@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/antihax/optional v1.0.0
 	github.com/hashicorp/go-cty v1.4.1-0.20200414143053-d3edf31b6320
-	github.com/hashicorp/terraform-plugin-log v0.2.1
+	github.com/hashicorp/terraform-plugin-log v0.8.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.10.1
 	golang.org/x/oauth2 v0.0.0-20220808172628-8227340efae7
 	golang.org/x/tools v0.1.12
@@ -36,10 +36,10 @@ require (
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/google/go-cmp v0.5.8 // indirect
+	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/hashicorp/go-checkpoint v0.5.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-hclog v1.1.0 // indirect
+	github.com/hashicorp/go-hclog v1.4.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-plugin v1.4.3 // indirect
 	github.com/hashicorp/go-uuid v1.0.2 // indirect
