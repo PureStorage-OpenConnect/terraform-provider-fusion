@@ -1,5 +1,5 @@
 /*
-Copyright 2022 Pure Storage Inc
+Copyright 2023 Pure Storage Inc
 SPDX-License-Identifier: Apache-2.0
 */
 
@@ -60,12 +60,12 @@ func TestAccHostAccessPolicy_RequiredAttributes(t *testing.T) {
 			// IQN attribute value is empty
 			{
 				Config:      testHostAccessPolicyConfig(rNameConfig, hostAccessPolicyName, displayName, "", "linux"),
-				ExpectError: regexp.MustCompile("Error: iqn must be specified"),
+				ExpectError: regexp.MustCompile("Error: Invalid IQN"),
 			},
 			// Personality attribute value is empty
 			{
 				Config:      testHostAccessPolicyConfig(rNameConfig, hostAccessPolicyName, displayName, iqn, ""),
-				ExpectError: regexp.MustCompile("Error: personality must be specified"),
+				ExpectError: regexp.MustCompile("Error: expected personality to be one of"),
 			},
 		},
 	})
@@ -95,11 +95,13 @@ func testHostAccessPolicyExists(rName string) resource.TestCheckFunc {
 
 		goclientHostAccessPolicy, _, err := testAccProvider.Meta().(*hmrest.APIClient).HostAccessPoliciesApi.GetHostAccessPolicy(context.Background(), attrs["name"], nil)
 		if err != nil {
-			return fmt.Errorf("Go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("Go client returned error while searching for %s. Error: %s", attrs["name"], err)
 		}
 		if strings.Compare(goclientHostAccessPolicy.Name, attrs["name"]) != 0 ||
-			strings.Compare(goclientHostAccessPolicy.DisplayName, attrs["display_name"]) != 0 {
-			return fmt.Errorf("Terraform host access policy doesnt match goclients host access policy")
+			strings.Compare(goclientHostAccessPolicy.DisplayName, attrs["display_name"]) != 0 ||
+			strings.Compare(goclientHostAccessPolicy.Iqn, attrs["iqn"]) != 0 ||
+			strings.Compare(goclientHostAccessPolicy.Personality, attrs["personality"]) != 0 {
+			return fmt.Errorf("Terraform host access policy doesn't match goclients host access policy")
 		}
 		return nil
 	}
@@ -112,14 +114,17 @@ func testCheckHAPDestroy(s *terraform.State) error {
 			continue
 		}
 		attrs := rs.Primary.Attributes
-		hostAccessPolicyName := attrs["name"]
+		hostAccessPolicyName, ok := attrs["name"]
+		if !ok {
+			continue // Skip data sources
+		}
 
 		_, resp, err := client.HostAccessPoliciesApi.GetHostAccessPolicy(context.Background(), hostAccessPolicyName, nil)
 		if err != nil && resp.StatusCode == http.StatusNotFound {
 			continue
-		} else {
-			return fmt.Errorf("Host access policy exist. Expected response code 404, got code %d", resp.StatusCode)
 		}
+
+		return fmt.Errorf("Host access policy exists. Expected response code 404, got code %d", resp.StatusCode)
 	}
 	return nil
 }

@@ -58,6 +58,10 @@ func TestAccPlacementGroup_EmptyAttributeValues(t *testing.T) {
 	placementGroupName := acctest.RandomWithPrefix("test_pg")
 	tsName := acctest.RandomWithPrefix("ts-pgtest")
 
+	tenant := acctest.RandomWithPrefix("tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant) +
+		testTenantSpaceConfigWithRefs("ts", "ts_dn", tsName, tenant)
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProvidersFactory,
@@ -65,17 +69,17 @@ func TestAccPlacementGroup_EmptyAttributeValues(t *testing.T) {
 		Steps: []resource.TestStep{
 			// storage_service_name is empty
 			{
-				Config:      testPGConfigWithTS("", rNameConfig, placementGroupName, displayName, region_name, availability_zone_name, "", tsName),
+				Config:      commonConfig + testPGConfig("", rNameConfig, placementGroupName, displayName, region_name, availability_zone_name, "", false),
 				ExpectError: regexp.MustCompile("Error: storage_service must be specified"),
 			},
 			// region_name is empty
 			{
-				Config:      testPGConfigWithTS("", rNameConfig, placementGroupName, displayName, "", availability_zone_name, testAccStorageService, tsName),
+				Config:      commonConfig + testPGConfig("", rNameConfig, placementGroupName, displayName, "", availability_zone_name, testAccStorageService, false),
 				ExpectError: regexp.MustCompile("Error: region must be specified"),
 			},
 			// availability_zone_name is empty
 			{
-				Config:      testPGConfigWithTS("", rNameConfig, placementGroupName, displayName, region_name, "", testAccStorageService, tsName),
+				Config:      commonConfig + testPGConfig("", rNameConfig, placementGroupName, displayName, region_name, "", testAccStorageService, false),
 				ExpectError: regexp.MustCompile("Error: availability_zone must be specified"),
 			},
 		},
@@ -117,7 +121,7 @@ func testPGConfig(skipAttribute string, pgName string, placementGroupName string
 		name                         = "%[2]s"
 		display_name                 = "%[3]s"
 		tenant_space_name            = fusion_tenant_space.ts.name
-		tenant_name                  = fusion_tenant_space.ts.tenant_name
+		tenant_name                  = fusion_tenant_space.ts.tenant
 		region_name                  = "%[4]s"
 		availability_zone_name       = "%[5]s"
 		storage_service_name         = "%[6]s"
@@ -143,7 +147,9 @@ func testPGConfig(skipAttribute string, pgName string, placementGroupName string
 
 // Defaults tenant_space_name and destroy_snapshots_on_delete
 func testPGConfigWithTS(skipAttribute string, pgName string, placementGroupName string, displayName string, regionName string, availabilityZone string, storageService string, tsName string) string {
-	resourceConfiguration := testTenantSpaceConfig("ts", "", tsName, testAccTenant) +
+	tenant := acctest.RandomWithPrefix("tenant")
+	resourceConfiguration := testTenantConfigNoDisplayName(tenant, tenant) +
+		testTenantSpaceConfigWithRefs("ts", "ts_dn", tsName, tenant) +
 		testPGConfig(skipAttribute, pgName, placementGroupName, displayName, regionName, availabilityZone, storageService, false)
 	return resourceConfiguration
 }
@@ -159,7 +165,7 @@ func testPlacementGroupExists(rName string, tsName string) resource.TestCheckFun
 		}
 		attrs := tfPlacementGroup.Primary.Attributes
 
-		goclientPlacementGroup, _, err := testAccProvider.Meta().(*hmrest.APIClient).PlacementGroupsApi.GetPlacementGroup(context.Background(), testAccTenant, tsName, attrs["name"], nil)
+		goclientPlacementGroup, _, err := testAccProvider.Meta().(*hmrest.APIClient).PlacementGroupsApi.GetPlacementGroup(context.Background(), attrs["tenant_name"], tsName, attrs["name"], nil)
 		if err != nil {
 			return fmt.Errorf("Go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
 		}

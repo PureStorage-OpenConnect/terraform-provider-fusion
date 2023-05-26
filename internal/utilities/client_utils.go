@@ -13,9 +13,10 @@ import (
 // Wait on an operation until its status reaches Succeeded (or Completed) or Failed.
 // Return succeeded = true if status reaches Succeeded (or Completed), Failed if status reached Failed, and err otherwise.
 // On return,
-//  op will be up to date with the most recent GET of the operation, EVEN when we're returning an error.
-//	if err != nil, then we have an error. Ignore succeeded (it will be false, but it doesn't mean the operation failed.)
-//  If err == nil, then check succeeded. It is true iff (op.Status == "Succeeded" || op.Status == "Completed") && op.Status != "Failed"
+//
+//	 op will be up to date with the most recent GET of the operation, EVEN when we're returning an error.
+//		if err != nil, then we have an error. Ignore succeeded (it will be false, but it doesn't mean the operation failed.)
+//	 If err == nil, then check succeeded. It is true iff (op.Status == "Succeeded" || op.Status == "Completed") && op.Status != "Failed"
 func WaitOnOperation(ctx context.Context, op *hmrest.Operation, client *hmrest.APIClient) (succeeded bool, err error) {
 	TraceOperation(ctx, op, "waitOnOperation")
 	tflog.Debug(ctx, "Waiting for operation",

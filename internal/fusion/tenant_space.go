@@ -1,55 +1,64 @@
 /*
-Copyright 2022 Pure Storage Inc
+Copyright 2023 Pure Storage Inc
 SPDX-License-Identifier: Apache-2.0
 */
 
 package fusion
 
 import (
-	context "context"
+	"context"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 )
-
-var tenantSpaceResourceFunctions *BaseResourceFunctions
 
 // Implements ResourceProvider
 type tenantSpaceProvider struct {
 	BaseResourceProvider
 }
 
-// This is our entry point for the Storage Class resource. Get it movin'
-func resourceTenantSpace() *schema.Resource {
-
-	vp := &tenantSpaceProvider{BaseResourceProvider{ResourceKind: "TenantSpace"}}
-	tenantSpaceResourceFunctions = NewBaseResourceFunctions("TenantSpace", vp)
-
-	tenantSpaceResourceFunctions.Resource.Schema = map[string]*schema.Schema{
-		"tenant_name": {
-			Type:     schema.TypeString,
-			Required: true,
+func schemaTenantSpace() map[string]*schema.Schema {
+	return map[string]*schema.Schema{
+		optionName: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the tenant space.",
 		},
-		"name": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionDisplayName: {
+			Type:         schema.TypeString,
+			Optional:     true,
+			Computed:     true,
+			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
+			Description:  "The human name of the tenant space. If not provided, defaults to I(name).",
 		},
-		"display_name": {
-			Type:     schema.TypeString,
-			Optional: true,
-			Computed: true,
+		optionTenant: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the tenant.",
 		},
 	}
+}
+
+// This is our entry point for the Tenant Space resource
+func resourceTenantSpace() *schema.Resource {
+	p := &tenantSpaceProvider{BaseResourceProvider{ResourceKind: "TenantSpace"}}
+
+	tenantSpaceResourceFunctions := NewBaseResourceFunctions("TenantSpace", p)
+	tenantSpaceResourceFunctions.Resource.Schema = schemaTenantSpace()
 
 	return tenantSpaceResourceFunctions.Resource
 }
 
-func (vp *tenantSpaceProvider) PrepareCreate(ctx context.Context, d *schema.ResourceData) (InvokeWriteAPI, ResourcePost, error) {
-	name := rdString(ctx, d, "name")
-	tenant := rdString(ctx, d, "tenant_name")
-	displayName := rdString(ctx, d, "display_name")
+func (p *tenantSpaceProvider) PrepareCreate(ctx context.Context, d *schema.ResourceData) (InvokeWriteAPI, ResourcePost, error) {
+	name := rdString(ctx, d, optionName)
+	displayName := rdStringDefault(ctx, d, optionDisplayName, name)
+	tenant := rdString(ctx, d, optionTenant)
 
 	body := hmrest.TenantSpacePost{
 		Name:        name,
@@ -64,46 +73,48 @@ func (vp *tenantSpaceProvider) PrepareCreate(ctx context.Context, d *schema.Reso
 	return fn, &body, nil
 }
 
-func (vp *tenantSpaceProvider) ReadResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) error {
+func (p *tenantSpaceProvider) ReadResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) error {
 	ts, _, err := client.TenantSpacesApi.GetTenantSpaceById(ctx, d.Id(), nil)
 	if err != nil {
 		return err
 	}
 
-	d.Set("name", ts.Name)
-	d.Set("display_name", ts.DisplayName)
-	d.Set("tenant_name", ts.Tenant.Name)
+	d.Set(optionName, ts.Name)
+	d.Set(optionDisplayName, ts.DisplayName)
+	d.Set(optionTenant, ts.Tenant.Name)
 	return nil
 }
 
-func (vp *tenantSpaceProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
-	tenant := d.Get("tenant_name").(string)
-	tenantSpaceName := rdString(ctx, d, "name")
+func (p *tenantSpaceProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
+	name := rdString(ctx, d, optionName)
+	tenant := rdString(ctx, d, optionTenant)
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
-		op, _, err := client.TenantSpacesApi.DeleteTenantSpace(ctx, tenant, tenantSpaceName, nil)
+		op, _, err := client.TenantSpacesApi.DeleteTenantSpace(ctx, tenant, name, nil)
 		return &op, err
 	}
 	return fn, nil
 }
 
-func (vp *tenantSpaceProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, []ResourcePatch, error) {
-	var patches []ResourcePatch // []*hmrest.TenantSpacePatch
-
-	tenant := d.Get("tenant_name").(string)
-	tenantSpaceName := d.Get("name").(string)
-	if d.HasChangeExcept("display_name") {
+func (p *tenantSpaceProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, []ResourcePatch, error) {
+	if d.HasChangeExcept(optionDisplayName) {
+		d.Partial(true)
 		return nil, nil, fmt.Errorf("attempting to update an immutable field")
-	} else {
-		displayName := d.Get("display_name").(string)
-		tflog.Info(ctx, "Updating", "display_name", displayName)
-		patches = append(patches, &hmrest.TenantSpacePatch{
+	}
+
+	name := rdString(ctx, d, optionName)
+	displayName := rdStringDefault(ctx, d, optionDisplayName, name)
+	tenant := rdString(ctx, d, optionTenant)
+
+	tflog.Info(ctx, "Updating", optionDisplayName, displayName)
+	patches := []ResourcePatch{
+		&hmrest.TenantSpacePatch{
 			DisplayName: &hmrest.NullableString{Value: displayName},
-		})
+		},
 	}
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
-		op, _, err := client.TenantSpacesApi.UpdateTenantSpace(ctx, *body.(*hmrest.TenantSpacePatch), tenant, tenantSpaceName, nil)
+		op, _, err := client.TenantSpacesApi.UpdateTenantSpace(ctx, *body.(*hmrest.TenantSpacePatch), tenant, name, nil)
 		return &op, err
 	}
 

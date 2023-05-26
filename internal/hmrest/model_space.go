@@ -17,9 +17,9 @@ package fusion
 type Space struct {
 	Resource *ResourceReference `json:"resource,omitempty"`
 	// Total physical space occupied by system, shared space, volume, and snapshot data. Measured in bytes.
-	TotalPhysicalSpace int64 `json:"total_physical_space,omitempty"`
+	TotalPhysicalSpace int64 `json:"total_physical_space"`
 	// The unique physical space occupied by customer data. Unique physical space does not include shared space, snapshots, and internal array metadata. Measured in bytes.
-	UniqueSpace int64 `json:"unique_space,omitempty"`
-	// The physical space occupied by data unique to one or more snapshots. Measured in bytes.
-	SnapshotSpace int64 `json:"snapshot_space,omitempty"`
+	UniqueSpace int64 `json:"unique_space"`
+	// The sum of total physical space occupied by one or more snapshots associated with the objects. Measured in bytes.
+	SnapshotSpace int64 `json:"snapshot_space"`
 }

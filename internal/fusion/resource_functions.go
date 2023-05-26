@@ -27,8 +27,8 @@ type ResourcePost interface { // could have: id, name
 }
 type RequestSpec interface{}
 
-//type InvokeReadMultiAPI func(ctx context.Context, client *hmrest.APIClient) (resource []interface{}, err error)
-//type InvokeReadSingleAPI func(ctx context.Context, client *hmrest.APIClient) (resource interface{}, err error)
+// type InvokeReadMultiAPI func(ctx context.Context, client *hmrest.APIClient) (resource []interface{}, err error)
+// type InvokeReadSingleAPI func(ctx context.Context, client *hmrest.APIClient) (resource interface{}, err error)
 type InvokeWriteAPI func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (operation *hmrest.Operation, err error)
 
 // This is what you need to implement as the owner of a resource. Use the BaseResourceFunctions to build a schema.
@@ -125,6 +125,7 @@ func (f *BaseResourceFunctions) resourceCreate(ctx context.Context, d *schema.Re
 	// succeeded!
 	tflog.Debug(ctx, "created successfully", "operation_result", op.Result)
 	d.SetId(op.Result.Resource.Id)
+
 	return f.resourceRead(ctx, d, m)
 }
 
@@ -226,10 +227,8 @@ func (f *BaseResourceFunctions) resourceBoilerplate(ctx context.Context, action 
 	return client, ctx
 }
 
-//
 // These RD wrappers don't do much yet, just ensure we get good logging on errors.
 // But for future's sake ... good fences make good neighbors.
-//
 func rdString(ctx context.Context, d *schema.ResourceData, key string) string {
 	value := d.Get(key)
 	if value == nil {
@@ -242,6 +241,7 @@ func rdString(ctx context.Context, d *schema.ResourceData, key string) string {
 	}
 	return s
 }
+
 func rdStringDefault(ctx context.Context, d *schema.ResourceData, key string, defaultValue string) string {
 	value := rdString(ctx, d, key)
 	if value == "" {
@@ -249,4 +249,25 @@ func rdStringDefault(ctx context.Context, d *schema.ResourceData, key string, de
 	}
 	return value
 }
+
 func rdInt(d *schema.ResourceData, key string) int { return d.Get(key).(int) }
+
+func rdStringSet(ctx context.Context, d *schema.ResourceData, key string) []string {
+	value := d.Get(key)
+	set, ok := value.(*schema.Set)
+	if !ok {
+		tflog.Error(ctx, "Got unexpected type value", "key", key, "type", fmt.Sprintf("%T", value), "value", value)
+		set = value.(*schema.Set)
+	} else if set == nil {
+		tflog.Error(ctx, "Got unexpected value", "key", key, "type", fmt.Sprintf("%T", value), "value", value)
+	}
+
+	interfaceList := set.List()
+	stringList := make([]string, len(interfaceList))
+
+	for i, val := range interfaceList {
+		stringList[i] = val.(string)
+	}
+
+	return stringList
+}

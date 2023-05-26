@@ -17,12 +17,12 @@ description: |-
 
 ### Required
 
-- `name` (String)
-- `tenant_name` (String)
+- `name` (String) The name of the tenant space.
+- `tenant` (String) The name of the tenant.
 
 ### Optional
 
-- `display_name` (String)
+- `display_name` (String) The human name of the tenant space. If not provided, defaults to I(name).
 
 ### Read-Only
 

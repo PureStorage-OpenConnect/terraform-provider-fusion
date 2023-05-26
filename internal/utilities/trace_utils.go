@@ -27,6 +27,17 @@ func TraceOperation(ctx context.Context, op *hmrest.Operation, userMessage strin
 	)
 }
 
+func TracePatch(ctx context.Context, resourceType string, resourceName string, parameterName string, value interface{}, patchIdx int) {
+	tflog.Trace(
+		ctx,
+		"update",
+		"resource_type", resourceType,
+		"resource_name", resourceName,
+		"parameter", parameterName,
+		"to", value,
+		"patch_idx", patchIdx)
+}
+
 // Recursively print error details
 func TraceError(ctx context.Context, err error) {
 	for err != nil {

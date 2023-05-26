@@ -17,13 +17,13 @@ description: |-
 
 ### Required
 
-- `iqn` (String)
-- `name` (String)
-- `personality` (String)
+- `iqn` (String) The iSCSI qualified name (IQN) associated with the host.
+- `name` (String) The name of the Host access policy.
 
 ### Optional
 
-- `display_name` (String)
+- `display_name` (String) The human name of the Host access policy. If not provided, defaults to I(name).
+- `personality` (String) The Personality of the Host machine.
 
 ### Read-Only
 

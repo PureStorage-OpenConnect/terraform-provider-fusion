@@ -96,15 +96,15 @@ func TestAccProvider_invalidConfigs(t *testing.T) {
 	})
 }
 
-//We want to test the provider config but Terraform will only initialize the provider if we are creating
-//resources with that provider, so we need to append this resource to test the provider config. We are
-//only testing invalid provider configurations here, so this resource won't actually be created
+// We want to test the provider config but Terraform will only initialize the provider if we are creating
+// resources with that provider, so we need to append this resource to test the provider config. We are
+// only testing invalid provider configurations here, so this resource won't actually be created
 func testTSConfig() string {
 	return `
 	resource "fusion_tenant_space" "ts" {
 		name          = "sales"
 		display_name  = "Sales"
-		tenant_name   = "acc-tenant"
+		tenant		  = "acc-tenant"
 	}
 	`
 }
@@ -254,8 +254,8 @@ func testCreateProviderObjects(t *testing.T) {
 	testCreateStorageService(ctx, client, t)
 }
 
-// sets the provider config values in the environment, and also returns them
-func testGetProviderConfig(t *testing.T) {
+// sets the provider config values in the environment
+func ConfigureApiClientForTests(t *testing.T) {
 
 	logFmt := "Required env var %s not set, searching for value in fusion config file"
 
@@ -283,7 +283,7 @@ func testGetProviderConfig(t *testing.T) {
 
 func testAccPreCheck(t *testing.T) {
 	testAccConfigure.Do(func() {
-		testGetProviderConfig(t)
+		ConfigureApiClientForTests(t)
 		testCreateProviderObjects(t)
 	})
 }

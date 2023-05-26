@@ -1,5 +1,5 @@
 /*
-Copyright 2022 Pure Storage Inc
+Copyright 2023 Pure Storage Inc
 SPDX-License-Identifier: Apache-2.0
 */
 
@@ -11,34 +11,45 @@ import (
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
-var hostAccessPolicyResourceFunctions *BaseResourceFunctions
-
-func resourceHostAccessPolicy() *schema.Resource {
-
-	vp := &hostAccessPolicyProvider{BaseResourceProvider{ResourceKind: "host_access_policy"}}
-	hostAccessPolicyResourceFunctions = NewBaseResourceFunctions("host_access_policy", vp)
-
-	hostAccessPolicyResourceFunctions.Resource.Schema = map[string]*schema.Schema{
-		"name": {
-			Type:     schema.TypeString,
-			Required: true,
+func schemaHostAccessPolicy() map[string]*schema.Schema {
+	return map[string]*schema.Schema{
+		optionName: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Host access policy.",
 		},
-		"display_name": {
-			Type:     schema.TypeString,
-			Optional: true,
-			Computed: true,
+		optionDisplayName: {
+			Type:         schema.TypeString,
+			Optional:     true,
+			Computed:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The human name of the Host access policy. If not provided, defaults to I(name).",
 		},
-		"iqn": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionIqn: {
+			Type:             schema.TypeString,
+			Required:         true,
+			Description:      "The iSCSI qualified name (IQN) associated with the host.",
+			ValidateDiagFunc: IsValidIQN,
 		},
-		"personality": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionPersonality: {
+			Type:         schema.TypeString,
+			Optional:     true,
+			Default:      "linux",
+			Description:  "The Personality of the Host machine.",
+			ValidateFunc: validation.StringInSlice(hapPersonalities, false),
 		},
 	}
+}
+
+func resourceHostAccessPolicy() *schema.Resource {
+	p := &hostAccessPolicyProvider{BaseResourceProvider{ResourceKind: "HostAccessPolicy"}}
+	hostAccessPolicyResourceFunctions := NewBaseResourceFunctions("HostAccessPolicy", p)
+
+	hostAccessPolicyResourceFunctions.Resource.Schema = schemaHostAccessPolicy()
 	return hostAccessPolicyResourceFunctions.Resource
 }
 
@@ -47,11 +58,11 @@ type hostAccessPolicyProvider struct {
 	BaseResourceProvider
 }
 
-func (vp *hostAccessPolicyProvider) PrepareCreate(ctx context.Context, d *schema.ResourceData) (InvokeWriteAPI, ResourcePost, error) {
-	hostAccessPolicyName := rdString(ctx, d, "name")
-	displayName := rdString(ctx, d, "display_name")
-	iqn := rdString(ctx, d, "iqn")
-	personality := rdString(ctx, d, "personality")
+func (p *hostAccessPolicyProvider) PrepareCreate(ctx context.Context, d *schema.ResourceData) (InvokeWriteAPI, ResourcePost, error) {
+	hostAccessPolicyName := rdString(ctx, d, optionName)
+	displayName := rdStringDefault(ctx, d, optionDisplayName, hostAccessPolicyName)
+	iqn := rdString(ctx, d, optionIqn)
+	personality := rdString(ctx, d, optionPersonality)
 
 	body := hmrest.HostAccessPoliciesPost{
 		Name:        hostAccessPolicyName,
@@ -67,22 +78,22 @@ func (vp *hostAccessPolicyProvider) PrepareCreate(ctx context.Context, d *schema
 	return fn, &body, nil
 }
 
-func (vp *hostAccessPolicyProvider) ReadResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) error {
+func (p *hostAccessPolicyProvider) ReadResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) error {
 	hap, _, err := client.HostAccessPoliciesApi.GetHostAccessPolicyById(ctx, d.Id(), nil)
 	if err != nil {
 		return err
 	}
 
-	d.Set("name", hap.Name)
-	d.Set("display_name", hap.DisplayName)
-	d.Set("iqn", hap.Iqn)
-	d.Set("personality", hap.Personality)
+	d.Set(optionName, hap.Name)
+	d.Set(optionDisplayName, hap.DisplayName)
+	d.Set(optionIqn, hap.Iqn)
+	d.Set(optionPersonality, hap.Personality)
 
 	return nil
 }
 
-func (vp *hostAccessPolicyProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
-	hostAccessPolicyName := rdString(ctx, d, "name")
+func (p *hostAccessPolicyProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
+	hostAccessPolicyName := rdString(ctx, d, optionName)
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 		op, _, err := client.HostAccessPoliciesApi.DeleteHostAccessPolicy(ctx, hostAccessPolicyName, nil)

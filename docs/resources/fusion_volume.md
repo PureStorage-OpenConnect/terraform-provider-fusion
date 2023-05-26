@@ -20,7 +20,6 @@ description: |-
 - `host_names` (Set of String)
 - `name` (String)
 - `placement_group_name` (String) WARNING: Changing this value will cause a new IQN number to be generated and will disrupt initiator access to this volume
-- `size` (Number)
 - `storage_class_name` (String)
 - `tenant_name` (String)
 - `tenant_space_name` (String)
@@ -28,7 +27,10 @@ description: |-
 ### Optional
 
 - `display_name` (String)
+- `eradicate_on_delete` (Boolean) Eradicate the volume when the volume is deleted.
 - `protection_policy_name` (String)
+- `size` (Number)
+- `source_link` (Block List, Max: 1) The link to copy data from. (see [below for nested schema](#nestedblock--source_link))
 
 ### Read-Only
 
@@ -37,5 +39,19 @@ description: |-
 - `serial_number` (String)
 - `target_iscsi_addresses` (Set of String)
 - `target_iscsi_iqn` (String)
+
+<a id="nestedblock--source_link"></a>
+### Nested Schema for `source_link`
+
+Required:
+
+- `tenant` (String) The Tenant name.
+- `tenant_space` (String) The Tenant Space name.
+
+Optional:
+
+- `snapshot` (String) The Snapshot name.
+- `volume` (String) The Volume name.
+- `volume_snapshot` (String) The Volume snapshot name.
 
 

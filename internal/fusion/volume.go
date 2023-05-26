@@ -7,21 +7,22 @@ package fusion
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 )
 
-var volumeResourceFunctions *BaseResourceFunctions
-
 // This is our entry point for the Volume resource. Get it movin'
 func resourceVolume() *schema.Resource {
+
 	vp := &volumeProvider{BaseResourceProvider{ResourceKind: "Volume"}}
-	volumeResourceFunctions = NewBaseResourceFunctions("Volume", vp)
+	volumeResourceFunctions := NewBaseResourceFunctions("Volume", vp)
 
 	volumeResourceFunctions.Resource.Schema = map[string]*schema.Schema{
 		"name": {
@@ -34,8 +35,10 @@ func resourceVolume() *schema.Resource {
 			Computed: true,
 		},
 		"size": {
-			Type:     schema.TypeInt,
-			Required: true,
+			Type:          schema.TypeInt,
+			Optional:      true,
+			Computed:      true,
+			ConflictsWith: []string{optionSourceLink},
 		},
 		"tenant_name": {
 			Type:     schema.TypeString,
@@ -84,6 +87,58 @@ func resourceVolume() *schema.Resource {
 				Type: schema.TypeString,
 			},
 		},
+		"eradicate_on_delete": {
+			Type:        schema.TypeBool,
+			Optional:    true,
+			Default:     false,
+			Description: "Eradicate the volume when the volume is deleted.",
+		},
+		optionSourceLink: {
+			Type:          schema.TypeList,
+			Optional:      true,
+			MaxItems:      1,
+			ConflictsWith: []string{optionSize},
+			Description:   "The link to copy data from.",
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					optionTenant: {
+						Type:         schema.TypeString,
+						Required:     true,
+						ValidateFunc: validation.StringIsNotEmpty,
+						Description:  "The Tenant name.",
+					},
+					optionTenantSpace: {
+						Type:         schema.TypeString,
+						Required:     true,
+						ValidateFunc: validation.StringIsNotEmpty,
+						Description:  "The Tenant Space name.",
+					},
+					optionSnapshot: {
+						Type:          schema.TypeString,
+						Optional:      true,
+						ValidateFunc:  validation.StringIsNotEmpty,
+						Description:   "The Snapshot name.",
+						RequiredWith:  []string{getSourceLinkItem(optionVolumeSnapshot)},
+						ConflictsWith: []string{getSourceLinkItem(optionVolume)},
+					},
+					optionVolumeSnapshot: {
+						Type:          schema.TypeString,
+						Optional:      true,
+						ValidateFunc:  validation.StringIsNotEmpty,
+						Description:   "The Volume snapshot name.",
+						RequiredWith:  []string{getSourceLinkItem(optionSnapshot)},
+						ConflictsWith: []string{getSourceLinkItem(optionVolume)},
+					},
+					optionVolume: {
+						Type:          schema.TypeString,
+						Optional:      true,
+						ValidateFunc:  validation.StringIsNotEmpty,
+						Description:   "The Volume name.",
+						ConflictsWith: []string{getSourceLinkItem(optionVolumeSnapshot), getSourceLinkItem(optionSnapshot)},
+					},
+				},
+			},
+		},
 	}
 
 	return volumeResourceFunctions.Resource
@@ -107,6 +162,10 @@ func (vp *volumeProvider) PrepareCreate(ctx context.Context, d *schema.ResourceD
 		StorageClass:     rdString(ctx, d, "storage_class_name"),
 		PlacementGroup:   rdString(ctx, d, "placement_group_name"),
 		ProtectionPolicy: rdString(ctx, d, "protection_policy_name"),
+	}
+
+	if _, ok := d.GetOk(optionSourceLink); ok {
+		body.SourceLink = vp.getSourceLink(ctx, d)
 	}
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
@@ -264,6 +323,19 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 			Size: &hmrest.NullableSize{Value: int64(size)},
 		})
 	}
+
+	// The source_link is present and has been changed
+	if _, ok := d.GetOk(optionSourceLink); ok && d.HasChange(optionSourceLink) {
+		if _, ok := d.GetOk(getSourceLinkItem(optionSnapshot)); ok {
+			return nil, patches, errors.New("cannot copy snapshot to existing volume")
+		}
+
+		sourceLink := vp.getSourceLink(ctx, d)
+		patches = append(patches, &hmrest.VolumePatch{
+			SourceLink: &hmrest.NullableString{Value: sourceLink},
+		})
+	}
+
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 		op, _, err := client.VolumesApi.UpdateVolume(ctx, *body.(*hmrest.VolumePatch), tenantName, tenantSpaceName, volumeName, nil)
 		return &op, err
@@ -276,6 +348,7 @@ func (vp *volumeProvider) PrepareDelete(ctx context.Context, client *hmrest.APIC
 	volumeName := d.Get("name").(string)
 	tenantSpaceName := d.Get("tenant_space_name").(string)
 	tenantName := d.Get("tenant_name").(string)
+	eradicate := d.Get("eradicate_on_delete").(bool)
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 		tflog.Trace(ctx, "removing host assignments before deleting volume")
@@ -286,6 +359,7 @@ func (vp *volumeProvider) PrepareDelete(ctx context.Context, client *hmrest.APIC
 		if err != nil {
 			return &op, err
 		}
+
 		succeeded, err := utilities.WaitOnOperation(ctx, &op, client)
 		if err != nil {
 			return &op, err
@@ -296,8 +370,57 @@ func (vp *volumeProvider) PrepareDelete(ctx context.Context, client *hmrest.APIC
 		}
 		tflog.Trace(ctx, "done removing host assignments")
 
+		tflog.Trace(ctx, "destroying volume")
+		op, _, err = client.VolumesApi.UpdateVolume(ctx, hmrest.VolumePatch{
+			Destroyed: &hmrest.NullableBoolean{Value: true},
+		}, tenantName, tenantSpaceName, volumeName, nil)
+
+		// Do not eradicate the volume - return the operation for patching the volume (destroyed=true)
+		if !eradicate {
+			return &op, err
+		}
+
+		utilities.TraceError(ctx, err)
+		if err != nil {
+			return &op, err
+		}
+
+		// Wait for patching the volume (destroyed=true)
+		succeeded, err = utilities.WaitOnOperation(ctx, &op, client)
+		if err != nil {
+			return &op, err
+		}
+		if !succeeded {
+			tflog.Error(ctx, "failed destroying volume")
+			return &op, fmt.Errorf("failed destroying volume")
+		}
+		tflog.Trace(ctx, "done destroying volume")
+
 		op, _, err = client.VolumesApi.DeleteVolume(ctx, tenantName, tenantSpaceName, volumeName, nil)
 		return &op, err
 	}
 	return fn, nil
+}
+
+func (vp *volumeProvider) getSourceLink(ctx context.Context, d *schema.ResourceData) string {
+	tenant := rdString(ctx, d, getSourceLinkItem(optionTenant))
+	ts := rdString(ctx, d, getSourceLinkItem(optionTenantSpace))
+
+	volume, isVolCopy := d.GetOk(getSourceLinkItem(optionVolume))
+	if isVolCopy {
+		// Copy from volume
+		return fmt.Sprintf("/tenants/%s/tenant-spaces/%s/volumes/%s", tenant, ts, volume.(string))
+	}
+
+	// Copy from snapshot
+	snapshot := rdString(ctx, d, getSourceLinkItem(optionSnapshot))
+	volumeSnapshot := rdString(ctx, d, getSourceLinkItem(optionVolumeSnapshot))
+
+	return fmt.Sprintf(
+		"/tenants/%s/tenant-spaces/%s/snapshots/%s/volume-snapshots/%s", tenant, ts, snapshot, volumeSnapshot,
+	)
+}
+
+func getSourceLinkItem(optionName string) string {
+	return fmt.Sprintf("%s.0.%s", optionSourceLink, optionName)
 }

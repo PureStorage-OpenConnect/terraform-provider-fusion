@@ -145,7 +145,22 @@ func (vp *placementGroupProvider) PrepareDelete(ctx context.Context, client *hmr
 					tflog.Trace(ctx, "Constructing Patch to Delete Snapshot", "name", snap.Name)
 					patches = append(patches, snap.Name)
 				}
+
 				fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
+					patchBody := hmrest.SnapshotPatch{Destroyed: &hmrest.NullableBoolean{Value: true}}
+					op, _, err := client.SnapshotsApi.UpdateSnapshot(ctx, patchBody, tenantName, tenantSpaceName, body.(string), nil)
+					if err != nil {
+						tflog.Error(ctx, "failed destroying a snapshot as part of deleting placement group",
+							"snapshot_name", body.(string))
+					}
+					return &op, err
+				}
+
+				if err := executePatches(ctx, fn, patches, client, "destroySnap"); err != nil {
+					return nil, err
+				}
+
+				fn = func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 					op, _, err := client.SnapshotsApi.DeleteSnapshot(ctx, tenantName, tenantSpaceName, body.(string), nil)
 					if err != nil {
 						tflog.Error(ctx, "failed deleting a snapshot as part of deleting placement group",
@@ -153,8 +168,8 @@ func (vp *placementGroupProvider) PrepareDelete(ctx context.Context, client *hmr
 					}
 					return &op, err
 				}
-				err := executePatches(ctx, fn, patches, client, "deleteSnap")
-				if err != nil {
+
+				if err = executePatches(ctx, fn, patches, client, "deleteSnap"); err != nil {
 					return nil, err
 				}
 			} else {

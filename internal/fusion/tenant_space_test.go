@@ -7,9 +7,7 @@ package fusion
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
@@ -29,6 +27,9 @@ func TestAccTenantSpace_basic(t *testing.T) {
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
 	tenantSpaceName := acctest.RandomWithPrefix("test_ts")
 
+	tenant := acctest.RandomWithPrefix("ts_test_tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant)
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProvidersFactory,
@@ -36,11 +37,11 @@ func TestAccTenantSpace_basic(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Tenant and validate it's fields
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", tenantSpaceName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
-					resource.TestCheckResourceAttr(rName, "tenant_name", testAccTenant),
+					resource.TestCheckResourceAttr(rName, "tenant", tenant),
 					testTenantSpaceExists(rName),
 				),
 			},
@@ -54,10 +55,11 @@ func TestAccTenantSpace_update(t *testing.T) {
 	rName := "fusion_tenant_space." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
 	displayName2 := acctest.RandomWithPrefix("tenant-space-display-name2")
-	buff := make([]byte, 257) // 256 is max length
-	rand.Read(buff)
-	displayNameTooBig := base64.StdEncoding.EncodeToString(buff)
+	displayNameTooBig := strings.Repeat("a", 257)
 	tenantSpaceName := acctest.RandomWithPrefix("test_ts")
+
+	tenant := acctest.RandomWithPrefix("ts_test_tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant)
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -66,17 +68,17 @@ func TestAccTenantSpace_update(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Tenant and validate it's fields
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", tenantSpaceName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
-					resource.TestCheckResourceAttr(rName, "tenant_name", testAccTenant),
+					resource.TestCheckResourceAttr(rName, "tenant", tenant),
 					testTenantSpaceExists(rName),
 				),
 			},
 			// Update the display name, assert that the tf resource got updated, then assert the backend shows the same
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName2, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName2, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "display_name", displayName2),
 					testTenantSpaceExists(rName),
@@ -84,22 +86,21 @@ func TestAccTenantSpace_update(t *testing.T) {
 			},
 			// Bad display name values
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayNameTooBig, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayNameTooBig, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "display_name", displayName2),
 					testTenantSpaceExists(rName),
 				),
-				ExpectError: regexp.MustCompile("display_name must be at most 256 characters"),
+				ExpectError: regexp.MustCompile(`expected length of display_name to be in the range \(1 - 256\), .?`),
 			},
 
-			// TODO: HM-2419
-			//Can't update certain values
+			// Can't update certain values
 			{
-				Config:      testTenantSpaceConfig(rNameConfig, displayName1, "immutable", testAccTenant),
+				Config:      commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, "immutable", tenant),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			{
-				Config:      testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, "immutable"),
+				Config:      commonConfig + testTenantSpaceConfigWithNames(rNameConfig, displayName1, tenantSpaceName, "immutable"),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			// When the test tries to destroy the resources at the end, it does not do a refresh first,
@@ -107,7 +108,7 @@ func TestAccTenantSpace_update(t *testing.T) {
 			// return the state to a valid config. Note that the "terraform destroy" command does do
 			// a refresh first, so this issue only applies to acceptance tests.
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant),
 			},
 		},
 	})
@@ -119,6 +120,9 @@ func TestAccTenantSpace_attributes(t *testing.T) {
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
 	tenantSpaceName := acctest.RandomWithPrefix("tenant-space-name")
 
+	tenant := acctest.RandomWithPrefix("ts_test_tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant)
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProvidersFactory,
@@ -126,30 +130,30 @@ func TestAccTenantSpace_attributes(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Missing required fields
 			{
-				Config:      testTenantSpaceConfig(rNameConfig, displayName1, "", testAccTenant),
-				ExpectError: regexp.MustCompile("Error: name must be specified"),
+				Config:      commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, "", tenant),
+				ExpectError: regexp.MustCompile(`expected "name" to not be an empty string`),
 			},
 			{
-				Config:      testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, ""),
-				ExpectError: regexp.MustCompile("Error: must specify Tenant name"),
+				Config:      commonConfig + testTenantSpaceConfigWithNames(rNameConfig, displayName1, tenantSpaceName, ""),
+				ExpectError: regexp.MustCompile(`expected "tenant" to not be an empty string`),
 			},
 			{
-				Config:      testTenantSpaceConfig(rNameConfig, displayName1, "bad name here", testAccTenant),
+				Config:      commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, "bad name here", tenant),
 				ExpectError: regexp.MustCompile("name must use alphanumeric characters"),
 			},
-			//{
+			// {
 			//	Config:      testTenantSpaceConfig(rNameConfig, displayName1, "", ""),
 			//	ExpectError: regexp.MustCompile("Error: Name & Tenant Space must be specified"), // TODO: HM-2420 this should be both!
-			//},
+			// },
 			// Create without display_name then update
 			{
-				Config: testTenantSpaceConfigNoDisplayName(rNameConfig, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigNoDisplayNameWithRefs(rNameConfig, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					testTenantSpaceExists(rName),
 				),
 			},
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
 					testTenantSpaceExists(rName),
@@ -170,6 +174,9 @@ func TestAccTenantSpace_multiple(t *testing.T) {
 	displayName2 := acctest.RandomWithPrefix("tenant-space-display-name")
 	tenantSpaceName2 := acctest.RandomWithPrefix("tenant-space-name")
 
+	tenant := acctest.RandomWithPrefix("ts_test_tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant)
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProvidersFactory,
@@ -177,8 +184,8 @@ func TestAccTenantSpace_multiple(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Sanity check two can be created at once
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant) + "\n" +
-					testTenantSpaceConfig(rNameConfig2, displayName2, tenantSpaceName2, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant) + "\n" +
+					testTenantSpaceConfigWithRefs(rNameConfig2, displayName2, tenantSpaceName2, tenant),
 				Check: resource.ComposeTestCheckFunc(
 					testTenantSpaceExists(rName),
 					testTenantSpaceExists(rName2),
@@ -186,9 +193,9 @@ func TestAccTenantSpace_multiple(t *testing.T) {
 			},
 			// Create two with same name
 			{
-				Config: testTenantSpaceConfig(rNameConfig, displayName1, tenantSpaceName, testAccTenant) + "\n" +
-					testTenantSpaceConfig(rNameConfig2, displayName2, tenantSpaceName2, testAccTenant) + "\n" +
-					testTenantSpaceConfig("conflictRN", "conflictDN", tenantSpaceName, testAccTenant),
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName1, tenantSpaceName, tenant) + "\n" +
+					testTenantSpaceConfigWithRefs(rNameConfig2, displayName2, tenantSpaceName2, tenant) + "\n" +
+					testTenantSpaceConfigWithRefs("conflictRN", "conflictDN", tenantSpaceName, tenant),
 				ExpectError: regexp.MustCompile("already exists"),
 			},
 		},
@@ -206,13 +213,13 @@ func testTenantSpaceExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfTenantSpace.Primary.Attributes
 
-		goclientTenantSpace, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantSpacesApi.GetTenantSpace(context.Background(), testAccTenant, attrs["name"], nil)
+		goclientTenantSpace, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantSpacesApi.GetTenantSpace(context.Background(), attrs["tenant"], attrs["name"], nil)
 		if err != nil {
 			return fmt.Errorf("go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
 		}
 		if strings.Compare(goclientTenantSpace.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientTenantSpace.DisplayName, attrs["display_name"]) != 0 ||
-			strings.Compare(goclientTenantSpace.Tenant.Name, attrs["tenant_name"]) != 0 {
+			strings.Compare(goclientTenantSpace.Tenant.Name, attrs["tenant"]) != 0 {
 			return fmt.Errorf("terraform tenant space doesnt match goclients tenant space")
 		}
 		return nil
@@ -229,8 +236,11 @@ func testCheckTenantSpaceDestroy(s *terraform.State) error {
 		}
 		attrs := rs.Primary.Attributes
 
-		tenantName := attrs["tenant_name"]
-		tenantSpaceName := attrs["name"]
+		tenantName := attrs["tenant"]
+		tenantSpaceName, ok := attrs["name"]
+		if !ok {
+			continue // Skip data sources
+		}
 
 		_, resp, err := client.TenantSpacesApi.GetTenantSpace(context.Background(), tenantName, tenantSpaceName, nil)
 		if err != nil && resp.StatusCode == http.StatusNotFound {
@@ -242,21 +252,31 @@ func testCheckTenantSpaceDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testTenantSpaceConfig(rName string, displayName string, tenantSpaceName string, tenantName string) string {
+func testTenantSpaceConfigWithNames(rName string, displayName string, tenantSpaceName string, tenantName string) string {
 	return fmt.Sprintf(`
 	resource "fusion_tenant_space" "%[1]s" {
-		name          = "%[2]s"
-		display_name  = "%[3]s"
-		tenant_name   = "%[4]s"
+		name			= "%[2]s"
+		display_name	= "%[3]s"
+		tenant			= "%[4]s"
 	}
 	`, rName, tenantSpaceName, displayName, tenantName)
 }
 
-func testTenantSpaceConfigNoDisplayName(rName string, tenantSpaceName string, tenantName string) string {
+func testTenantSpaceConfigWithRefs(rName string, displayName string, tenantSpaceName string, tenantName string) string {
 	return fmt.Sprintf(`
 	resource "fusion_tenant_space" "%[1]s" {
-		name          = "%[2]s"
-		tenant_name        = "%[3]s"
+		name			= "%[2]s"
+		display_name	= "%[3]s"
+		tenant			= fusion_tenant.%[4]s.name
+	}
+	`, rName, tenantSpaceName, displayName, tenantName)
+}
+
+func testTenantSpaceConfigNoDisplayNameWithRefs(rName string, tenantSpaceName string, tenantName string) string {
+	return fmt.Sprintf(`
+	resource "fusion_tenant_space" "%[1]s" {
+		name	= "%[2]s"
+		tenant	= fusion_tenant.%[3]s.name
 	}
 	`, rName, tenantSpaceName, tenantName)
 }
