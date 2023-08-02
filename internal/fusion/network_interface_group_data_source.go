@@ -27,11 +27,13 @@ func dataSourceNetworkInterfaceGroup() *schema.Resource {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Availability Zone for the Network Interface Group.",
 		},
 		optionRegion: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of Region for the Network Interface Group.",
 		},
 		optionItems: {
 			Type:     schema.TypeList,
@@ -39,6 +41,7 @@ func dataSourceNetworkInterfaceGroup() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaNetworkInterfaceGroup(),
 			},
+			Description: "List of matching Network Interface Groups.",
 		},
 	}
 
@@ -56,7 +59,7 @@ func (ds *networkInterfaceGroupDataSource) ReadDataSource(ctx context.Context, c
 		return err
 	}
 
-	networkInterfaceGroupsList := make([]map[string]interface{}, resp.Count)
+	networkInterfaceGroupsList := make([]map[string]interface{}, 0, resp.Count)
 
 	for _, nig := range resp.Items {
 		networkInterfaceGroupsList = append(networkInterfaceGroupsList, map[string]interface{}{
@@ -65,7 +68,7 @@ func (ds *networkInterfaceGroupDataSource) ReadDataSource(ctx context.Context, c
 			optionAvailabilityZone: nig.AvailabilityZone.Name,
 			optionRegion:           nig.Region.Name,
 			optionGroupType:        nig.GroupType,
-			optionGroupTypeEth: []map[string]interface{}{{
+			optionEth: []map[string]interface{}{{
 				optionGateway: nig.Eth.Gateway,
 				optionPrefix:  nig.Eth.Prefix,
 				optionMtu:     nig.Eth.Mtu,

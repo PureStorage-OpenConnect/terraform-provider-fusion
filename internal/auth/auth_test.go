@@ -14,11 +14,23 @@ import (
 
 // Performs a test against production pure1 auth endpoint
 func TestProduction(t *testing.T) {
-	t.Setenv("PURE1_AUTHENTICATION_ENDPOINT", "")
-	_, err := auth.GetPure1SelfSignedAccessTokenGoodForOneHour(
+	t.Setenv("FUSION_TOKEN_ENDPOINT", "")
+
+	if os.Getenv("TEST_PURE1_PROD_ISSUERID") == "" {
+		t.Skip("TEST_PURE1_PROD_ISSUERID not set")
+	}
+
+	privateKey, err := auth.ReadPrivateKeyFile(os.Getenv("TEST_PURE1_PROD_PRIVATE_KEY_PATH"))
+	if err != nil {
+		t.Errorf("main: %s", err)
+	}
+
+	_, err = auth.GetPure1SelfSignedAccessTokenGoodForOneHour(
 		context.Background(),
 		os.Getenv("TEST_PURE1_PROD_ISSUERID"),
-		os.Getenv("TEST_PURE1_PROD_PRIVATE_KEY_PATH"),
+		privateKey,
+		auth.DefaultAuthNEndpoint,
+		"",
 	)
 	if err != nil {
 		t.Errorf("main: %s", err)
@@ -27,13 +39,58 @@ func TestProduction(t *testing.T) {
 
 // Performs a test against endpoint specified by PURE1_AUTHENTICATION_ENDPOINT if its set...
 func TestStaging(t *testing.T) {
-	if os.Getenv("PURE1_AUTHENTICATION_ENDPOINT") == "" {
-		t.Skip("PURE1_AUTHENTICATION_ENDPOINT not set")
+	if os.Getenv("FUSION_TOKEN_ENDPOINT") == "" {
+		t.Skip("FUSION_TOKEN_ENDPOINT not set")
 	}
-	_, err := auth.GetPure1SelfSignedAccessTokenGoodForOneHour(
+	if os.Getenv("TEST_PURE1_STAGING_ISSUERID") == "" {
+		t.Skip("TEST_PURE1_STAGING_ISSUERID not set")
+	}
+	if os.Getenv("TEST_PURE1_STAGING_PRIVATE_KEY_PATH") == "" {
+		t.Skip("TEST_PURE1_STAGING_PRIVATE_KEY_PATH not set")
+	}
+
+	privateKey, err := auth.ReadPrivateKeyFile(os.Getenv("TEST_PURE1_STAGING_PRIVATE_KEY_PATH"))
+	if err != nil {
+		t.Errorf("main: %s", err)
+	}
+
+	_, err = auth.GetPure1SelfSignedAccessTokenGoodForOneHour(
 		context.Background(),
 		os.Getenv("TEST_PURE1_STAGING_ISSUERID"),
-		os.Getenv("TEST_PURE1_STAGING_PRIVATE_KEY_PATH"),
+		privateKey,
+		os.Getenv("FUSION_TOKEN_ENDPOINT"),
+		"",
+	)
+	if err != nil {
+		t.Errorf("main: %s", err)
+	}
+}
+
+func TestStagingEncrypted(t *testing.T) {
+	if os.Getenv("FUSION_TOKEN_ENDPOINT") == "" {
+		t.Skip("FUSION_TOKEN_ENDPOINT not set")
+	}
+	if os.Getenv("TEST_PURE1_STAGING_ISSUERID") == "" {
+		t.Skip("TEST_PURE1_STAGING_ISSUERID not set")
+	}
+	if os.Getenv("TEST_PURE1_STAGING_ENCRYPTED_PRIVATE_KEY_PATH") == "" {
+		t.Skip("TEST_PURE1_STAGING_ENCRYPTED_PRIVATE_KEY_PATH not set")
+	}
+	if os.Getenv("STAGING_PRIVATE_KEY_PASSWORD") == "" {
+		t.Skip("STAGING_PRIVATE_KEY_PASSWORD not set")
+	}
+
+	privateKey, err := auth.ReadPrivateKeyFile(os.Getenv("TEST_PURE1_STAGING_ENCRYPTED_PRIVATE_KEY_PATH"))
+	if err != nil {
+		t.Errorf("main: %s", err)
+	}
+
+	_, err = auth.GetPure1SelfSignedAccessTokenGoodForOneHour(
+		context.Background(),
+		os.Getenv("TEST_PURE1_STAGING_ISSUERID"),
+		privateKey,
+		os.Getenv("FUSION_TOKEN_ENDPOINT"),
+		os.Getenv("STAGING_PRIVATE_KEY_PASSWORD"),
 	)
 	if err != nil {
 		t.Errorf("main: %s", err)

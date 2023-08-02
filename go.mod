@@ -29,7 +29,7 @@ require (
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/vmihailenco/tagparser v0.1.2 // indirect
 	golang.org/x/net v0.5.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/sys v0.6.0 // indirect
 	google.golang.org/genproto v0.0.0-20221205194025-8222ab48f5fc // indirect
 )
 
@@ -41,7 +41,7 @@ require (
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/hashicorp/go-checkpoint v0.5.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-hclog v1.1.0 // indirect
+	github.com/hashicorp/go-hclog v1.2.1 // indirect
 	github.com/hashicorp/go-plugin v1.4.3 // indirect
 	github.com/hashicorp/go-uuid v1.0.2 // indirect
 	github.com/hashicorp/go-version v1.4.0 // indirect

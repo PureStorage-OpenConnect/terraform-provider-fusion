@@ -7,6 +7,8 @@ package utilities
 import (
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConvertDataUnitsToInt64_validInputs(t *testing.T) {
@@ -78,5 +80,56 @@ func TestConvertDataUnitsToInt64_invalidInputs(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestParseAndValidateSelfLink_success(t *testing.T) {
+	groupNames := []string{
+		"tenants",
+		"tenant-spaces",
+		"volumes",
+	}
+
+	expectedTenant, expectedTenantSpace, expectedVolume := "a", "b", "c"
+	selfLink := "/tenants/a/tenant-spaces/b/volumes/c"
+
+	parsedSelfLink, err := ParseSelfLink(selfLink, groupNames)
+	assert.Nil(t, err)
+	assert.Equal(t, expectedTenant, parsedSelfLink["tenants"])
+	assert.Equal(t, expectedTenantSpace, parsedSelfLink["tenant-spaces"])
+	assert.Equal(t, expectedVolume, parsedSelfLink["volumes"])
+}
+
+func TestParseAndValidateSelfLink_failure(t *testing.T) {
+	expectedErr := "self link has incorrect format"
+
+	groupNames := []string{
+		"tenants",
+		"tenant-spaces",
+		"volumes",
+	}
+
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"empty string", ""},
+		{"slash only", "/"},
+		{"only tenants", "/tenants/"},
+		{"only tenants with value", "/tenants/abc"},
+		{"no tenant space value", "/tenants/a/tenant-spaces//volumes/c"},
+		{"no volume value", "/tenants/a/tenant-spaces/b/volumes/"},
+		{"no tenant value", "/tenants//tenant-spaces/b/volumes/c"},
+		{"switched tenant space and tenants", "/tenant-spaces/a/tenants/b/volumes/c"},
+		{"no leading slash", "tenant-spaces/a/tenants/b/volumes/c"},
+		{"trailing slash", "/tenant-spaces/a/tenants/b/volumes/c/"},
+		{"redudant string on the start of path", "a/tenant-spaces/a/tenants/b/volumes/c"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsedSelfLink, err := ParseSelfLink(tt.id, groupNames)
+			assert.Nil(t, parsedSelfLink)
+			assert.EqualError(t, err, expectedErr)
+		})
+	}
 }

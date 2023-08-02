@@ -60,7 +60,7 @@ func TestIsValidPrefix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := IsValidPrefix(tt.addr)
+			actual := IsValidCidr(tt.addr)
 			if tt.expected != actual {
 				t.Errorf("expected: %t actual: %t", tt.expected, actual)
 			}

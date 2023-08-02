@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -22,6 +23,8 @@ import (
 
 // Creates and destroys
 func TestAccRegion_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("region_test")
 	rName := "fusion_region." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("region-display-name")
@@ -47,6 +50,8 @@ func TestAccRegion_basic(t *testing.T) {
 
 // Updates display name
 func TestAccRegion_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("region_test")
 	rName := "fusion_region." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("region-display-name")
@@ -85,6 +90,8 @@ func TestAccRegion_update(t *testing.T) {
 }
 
 func TestAccRegion_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("region_test")
 	rName := "fusion_region." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("region-display-name")
@@ -118,6 +125,8 @@ func TestAccRegion_attributes(t *testing.T) {
 }
 
 func TestAccRegion_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("region_test")
 	rName := "fusion_region." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("region-display-name")
@@ -153,6 +162,50 @@ func TestAccRegion_multiple(t *testing.T) {
 	})
 }
 
+func TestAccRegion_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("region_test")
+	rName := "fusion_region." + rNameConfig
+	displayName := acctest.RandomWithPrefix("region-display-name")
+	regionName := acctest.RandomWithPrefix("region-name")
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckRegionDestroy,
+		Steps: []resource.TestStep{
+			// Create Region and validate it's fields
+			{
+				Config: testRegionConfig(rNameConfig, regionName, displayName),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", regionName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					testRegionExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_region.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/regions/%s", regionName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_region.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/regions/wrong-%s", regionName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_region.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/%s", regionName),
+				ExpectError:   regexp.MustCompile("invalid region import path. Expected path in format '/regions/<region>'"),
+			},
+		},
+	})
+}
+
 func testRegionExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfRegion, ok := s.RootModule().Resources[rName]
@@ -164,9 +217,9 @@ func testRegionExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfRegion.Primary.Attributes
 
-		goclientRegion, _, err := testAccProvider.Meta().(*hmrest.APIClient).RegionsApi.GetRegion(context.Background(), attrs["name"], nil)
+		goclientRegion, _, err := testAccProvider.Meta().(*hmrest.APIClient).RegionsApi.GetRegionById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientRegion.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientRegion.DisplayName, attrs["display_name"]) != 0 {

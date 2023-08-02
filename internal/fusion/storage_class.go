@@ -35,7 +35,7 @@ func schemaStorageClass() map[string]*schema.Schema {
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
-			Description:  "The human name of the Storage Class. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Storage Class. If not provided, defaults to I(name).",
 		},
 		optionStorageService: {
 			Type:         schema.TypeString,
@@ -49,7 +49,7 @@ func schemaStorageClass() map[string]*schema.Schema {
 			ValidateDiagFunc: utilities.DataUnitsBeetween(storageClassSizeMin, storageClassSizeMax, 1024),
 			DiffSuppressFunc: utilities.GetDiffSuppressForDataUnits(1024),
 			Default:          "4P",
-			Description: `Top volume size limit of Storage Class. 
+			Description: `Maximum Volume size limit of Storage Class. 
 			- Volume size limit in M, G, T or P units.
 			- Must be between 1MB and 4PB.
 			- If not provided at creation, this will default to 4PB.`,
@@ -63,7 +63,7 @@ func schemaStorageClass() map[string]*schema.Schema {
 			),
 			Default:          "100M",
 			DiffSuppressFunc: utilities.GetDiffSuppressForDataUnits(1000),
-			Description: `Top IOPS limit of Storage Class.
+			Description: `Maximum IOPS limit of Storage Class.
 			- The IOPs limit - use value or K or M.
 			K will mean 1000.
 			M will mean 1000000.
@@ -79,7 +79,7 @@ func schemaStorageClass() map[string]*schema.Schema {
 			),
 			Default:          "512G",
 			DiffSuppressFunc: utilities.GetDiffSuppressForDataUnits(1024),
-			Description: `Top bandwidth limit of Storage Class.
+			Description: `Maximum Bandwidth Limit of Storage Class.
 			- The bandwidth limit in M or G units.
 			M will set MB/s.
 			G will set GB/s.
@@ -90,8 +90,11 @@ func schemaStorageClass() map[string]*schema.Schema {
 }
 
 func resourceStorageClass() *schema.Resource {
-	p := &storageClassProvider{BaseResourceProvider{ResourceKind: "StorageClass"}}
-	storageClassResourceFunctions := NewBaseResourceFunctions("StorageClass", p)
+	p := &storageClassProvider{BaseResourceProvider{ResourceKind: resourceKindStorageClass}}
+	storageClassResourceFunctions := NewBaseResourceFunctions(resourceKindStorageClass, p)
+	storageClassResourceFunctions.Resource.Description = `A Storage Class (e.g. "Gold") is published by the AZ Admin.` +
+		` It is a coarse grained tier, perhaps just one per Storage Service and QoS.` +
+		` It specifies a Max IOPS / GB, bandwidth and size; as well as Storage Service.`
 	storageClassResourceFunctions.Schema = schemaStorageClass()
 
 	return storageClassResourceFunctions.Resource
@@ -126,14 +129,7 @@ func (p *storageClassProvider) ReadResource(ctx context.Context, client *hmrest.
 		return err
 	}
 
-	d.Set(optionName, sc.Name)
-	d.Set(optionDisplayName, sc.DisplayName)
-	d.Set(optionStorageService, sc.StorageService.Name)
-	d.Set(optionSizeLimit, strconv.FormatInt(sc.SizeLimit, 10))
-	d.Set(optionIopsLimit, strconv.FormatInt(sc.IopsLimit, 10))
-	d.Set(optionBandwidthLimit, strconv.FormatInt(sc.BandwidthLimit, 10))
-
-	return nil
+	return p.loadStorageClass(sc, d)
 }
 
 func (p *storageClassProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, []ResourcePatch, error) {
@@ -169,4 +165,42 @@ func (p *storageClassProvider) PrepareDelete(ctx context.Context, client *hmrest
 		return &op, err
 	}
 	return fn, nil
+}
+
+func (p *storageClassProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{
+		resourceGroupNameStorageService,
+		resourceGroupNameStorageClass,
+	}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage_class import path. Expected path in format '/storage-services/<storage-service>/storage-classes/<storage-class>'")
+	}
+
+	storageClass, _, err := client.StorageClassesApi.GetStorageClass(ctx, selfLinkFieldsWithValues[resourceGroupNameStorageService], selfLinkFieldsWithValues[resourceGroupNameStorageClass], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadStorageClass(storageClass, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(storageClass.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *storageClassProvider) loadStorageClass(sc hmrest.StorageClass, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, sc.Name),
+		d.Set(optionDisplayName, sc.DisplayName),
+		d.Set(optionStorageService, sc.StorageService.Name),
+		d.Set(optionSizeLimit, strconv.FormatInt(sc.SizeLimit, 10)),
+		d.Set(optionIopsLimit, strconv.FormatInt(sc.IopsLimit, 10)),
+		d.Set(optionBandwidthLimit, strconv.FormatInt(sc.BandwidthLimit, 10)),
+	)
 }

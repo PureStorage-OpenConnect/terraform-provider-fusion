@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -45,6 +46,8 @@ func generatePublicKey() (string, error) {
 
 // Creates and destroys
 func TestAccApiClient_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("ac_test")
 	rName := "fusion_api_client." + rNameConfig
 	displayName := acctest.RandomWithPrefix("ac-display-name")
@@ -72,6 +75,8 @@ func TestAccApiClient_basic(t *testing.T) {
 }
 
 func TestAccApiClient_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("ac_test")
 	rName := "fusion_api_client." + rNameConfig
 	displayName := acctest.RandomWithPrefix("ac-display-name")
@@ -99,15 +104,13 @@ func TestAccApiClient_update(t *testing.T) {
 				Config:      testApiClientConfig(rNameConfig, "immutable", publicKey),
 				ExpectError: regexp.MustCompile("unsupported operation: update"),
 			},
-			// TODO: Remove this step once the HM-5438 bug is resolved
-			{
-				Config: testApiClientConfig(rNameConfig, displayName, publicKey),
-			},
 		},
 	})
 }
 
 func TestAccApiClient_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig1 := acctest.RandomWithPrefix("ac_test")
 	rName1 := "fusion_api_client." + rNameConfig1
 	displayName1 := acctest.RandomWithPrefix("ac-display-name")
@@ -149,6 +152,53 @@ func TestAccApiClient_multiple(t *testing.T) {
 	})
 }
 
+func TestAccApiClient_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("ac_test")
+	rName := "fusion_api_client." + rNameConfig
+	displayName := acctest.RandomWithPrefix("ac-display-name")
+	publicKey, err := generatePublicKey()
+	if err != nil {
+		t.FailNow()
+	}
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckApiClientDestroy,
+		Steps: []resource.TestStep{
+			// Create Api Client and validate its fields
+			{
+				Config: testApiClientConfig(rNameConfig, displayName, publicKey),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "public_key", publicKey),
+					testApiClientExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_api_client.%s", rNameConfig),
+				ImportStateIdFunc: testMakeSelfLinkForImportApiClient(rName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_api_client.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/api-clients/wrong-%[1]s", displayName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_api_client.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/%[1]s", displayName),
+				ExpectError:   regexp.MustCompile("invalid api_client import path. Expected path in format '/api-clients/<api-client-id>'"),
+			},
+		},
+	})
+}
+
 func testApiClientExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfApiClient, ok := s.RootModule().Resources[rName]
@@ -162,7 +212,7 @@ func testApiClientExists(rName string) resource.TestCheckFunc {
 
 		goclientApiClient, _, err := testAccProvider.Meta().(*hmrest.APIClient).IdentityManagerApi.GetApiClientById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientApiClient.DisplayName, attrs["display_name"]) != 0 ||
 			strings.Compare(goclientApiClient.PublicKey, attrs["public_key"]) != 0 {
@@ -190,6 +240,17 @@ func testCheckApiClientDestroy(s *terraform.State) error {
 		return fmt.Errorf("api client may still exist")
 	}
 	return nil
+}
+
+func testMakeSelfLinkForImportApiClient(rName string) resource.ImportStateIdFunc {
+	return func(s *terraform.State) (string, error) {
+		tfApiClient, ok := s.RootModule().Resources[rName]
+		if !ok {
+			return "", fmt.Errorf("resource not found: %s", rName)
+		}
+		attrs := tfApiClient.Primary.Attributes
+		return fmt.Sprintf("/api-clients/%s", attrs["id"]), nil
+	}
 }
 
 func testApiClientConfig(rName, displayName, publicKey string) string {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -27,22 +28,25 @@ func schemaTenant() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the tenant.",
+			Description:  "The name of the Tenant.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The human name of the tenant. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the tenant. If not provided, defaults to I(name).",
 		},
 	}
 }
 
 func resourceTenant() *schema.Resource {
-	p := &tenantProvider{BaseResourceProvider{ResourceKind: "Tenant"}}
+	p := &tenantProvider{BaseResourceProvider{ResourceKind: resourceKindTenant}}
 
-	tenantResourceFunctions := NewBaseResourceFunctions("Tenant", p)
+	tenantResourceFunctions := NewBaseResourceFunctions(resourceKindTenant, p)
+	tenantResourceFunctions.Resource.Description = `A Tenant (e.g. "Engineering") is created within` +
+		` an Organization to group Tenant Spaces. It enables departments within a company to operate autonomously.` +
+		` It is created by an AZ Admin.`
 	tenantResourceFunctions.Resource.Schema = schemaTenant()
 
 	return tenantResourceFunctions.Resource
@@ -71,10 +75,7 @@ func (p *tenantProvider) ReadResource(ctx context.Context, client *hmrest.APICli
 		return err
 	}
 
-	d.Set(optionName, t.Name)
-	d.Set(optionDisplayName, t.DisplayName)
-
-	return nil
+	return p.loadTenant(t, d)
 }
 
 func (p *tenantProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -108,4 +109,35 @@ func (p *tenantProvider) PrepareUpdate(ctx context.Context, client *hmrest.APICl
 	}
 
 	return fn, patches, nil
+}
+
+func (p *tenantProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{resourceGroupNameTenant}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant import path. Expected path in format '/tenants/<tenant>'")
+	}
+
+	tenant, _, err := client.TenantsApi.GetTenant(ctx, selfLinkFieldsWithValues[resourceGroupNameTenant], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadTenant(tenant, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(tenant.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (vp *tenantProvider) loadTenant(tenant hmrest.Tenant, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, tenant.Name),
+		d.Set(optionDisplayName, tenant.DisplayName),
+	)
 }

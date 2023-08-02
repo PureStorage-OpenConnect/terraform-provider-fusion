@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -22,6 +23,8 @@ import (
 
 // Creates and destroys
 func TestAccTenant_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_test")
 	rName := "fusion_tenant." + rNameConfig
 	tenantName := acctest.RandomWithPrefix("test_tenant")
@@ -47,6 +50,8 @@ func TestAccTenant_basic(t *testing.T) {
 
 // Updates display name
 func TestAccTenant_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_test")
 	rName := "fusion_tenant." + rNameConfig
 	tenantName := acctest.RandomWithPrefix("test_tenant")
@@ -85,6 +90,8 @@ func TestAccTenant_update(t *testing.T) {
 }
 
 func TestAccTenant_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_test")
 	rName := "fusion_tenant." + rNameConfig
 	tenantName := acctest.RandomWithPrefix("test_tenant")
@@ -123,6 +130,8 @@ func TestAccTenant_attributes(t *testing.T) {
 }
 
 func TestAccTenant_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig1 := acctest.RandomWithPrefix("tenant_test_1")
 	rName1 := "fusion_tenant." + rNameConfig1
 	tenantName1 := acctest.RandomWithPrefix("test_tenant_1")
@@ -158,6 +167,50 @@ func TestAccTenant_multiple(t *testing.T) {
 	})
 }
 
+func TestAccTenant_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("tenant_test")
+	rName := "fusion_tenant." + rNameConfig
+	tenantName := acctest.RandomWithPrefix("test_tenant")
+	displayName := acctest.RandomWithPrefix("tenant-display-name")
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckTenantDestroy,
+		Steps: []resource.TestStep{
+			// Create Tenant and validate it's fields
+			{
+				Config: testTenantConfig(rNameConfig, tenantName, displayName),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", tenantName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					testTenantExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_tenant.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/tenants/%s", tenantName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_tenant.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/tenants/wrong-%s", tenantName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_tenant.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/%s", tenantName),
+				ExpectError:   regexp.MustCompile("invalid tenant import path. Expected path in format '/tenants/<tenant>'"),
+			},
+		},
+	})
+}
+
 func testTenantExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfTenant, ok := s.RootModule().Resources[rName]
@@ -169,9 +222,9 @@ func testTenantExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfTenant.Primary.Attributes
 
-		goclientTenant, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantsApi.GetTenant(context.Background(), attrs["name"], nil)
+		goclientTenant, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantsApi.GetTenantById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client retutrned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientTenant.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientTenant.DisplayName, attrs["display_name"]) != 0 {

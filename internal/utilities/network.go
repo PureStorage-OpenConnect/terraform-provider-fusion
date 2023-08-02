@@ -19,12 +19,12 @@ func IsValidAddress(addr string) bool {
 	return ipRegex.MatchString(addr)
 }
 
-func IsValidPrefix(prefix string) bool {
+func IsValidCidr(prefix string) bool {
 	return cidrRegex.MatchString(prefix)
 }
 
 func IsAddressInPrefix(addr, prefix string) bool {
-	if !IsValidAddress(addr) || !IsValidPrefix(prefix) {
+	if !IsValidAddress(addr) || !IsValidCidr(prefix) {
 		return false
 	}
 

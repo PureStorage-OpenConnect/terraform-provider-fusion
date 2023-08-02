@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -48,10 +47,7 @@ func TestAccArray_all(t *testing.T) {
 	// poaching is SLOW (90s/round ATM).
 	// Having tests separately would mean having to do separate poaching for each
 	// test and you are likely to sooner colonize Mars than for the tests to complete.
-	if os.Getenv(resource.TestEnvVar) == "" {
-		t.Skipf("Acceptance tests skipped unless env '%s' set", resource.TestEnvVar)
-		return
-	}
+	utilities.CheckTestSkip(t)
 
 	arrays, release := FindArraysForTests(t, 3)
 	arraysToTestOn = arrays
@@ -65,6 +61,7 @@ func TestAccArray_all(t *testing.T) {
 	t.Run("TestAccArray_immutables", testAccArray_immutables)
 	t.Run("TestAccArray_multiple", testAccArray_multiple)
 	t.Run("TestAccArray_update", testAccArray_update)
+	t.Run("TestAccArrayDataSource_import", testAccArray_import)
 	t.Run("TestAccArrayDataSource_basic", testAccArrayDataSource_basic)
 }
 
@@ -371,6 +368,54 @@ func testAccArray_multiple(t *testing.T) {
 	})
 }
 
+func testAccArray_import(t *testing.T) {
+	array := arraysToTestOn[0]
+
+	tfName := acctest.RandomWithPrefix("array_test_tf_array")
+	arrayName := acctest.RandomWithPrefix("array_test_fs_array")
+	displayName := acctest.RandomWithPrefix("array_test_display_name")
+	availabilityZone := acctest.RandomWithPrefix("array_test_az")
+	region := acctest.RandomWithPrefix("array_test_region")
+
+	commonConfig := "" +
+		testRegionConfig(region, region, region) +
+		testAvailabilityZoneConfig(availabilityZone, availabilityZone, availabilityZone, region)
+
+	printArrayConfig := testArrayConfig(tfName, arrayName, displayName, array.HardwareType, region, availabilityZone, array.ApplianceId, array.HostName, false, false)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckArrayDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: commonConfig + printArrayConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testArrayExists(tfName, t),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_array.%s", tfName),
+				ImportStateId:     fmt.Sprintf("/regions/%[1]s/availability-zones/%[2]s/arrays/%[3]s", region, availabilityZone, arrayName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_array.%s", tfName),
+				ImportStateId: fmt.Sprintf("/regions/%[1]s/availability-zones/%[2]s/arrays/wrong-%[3]s", region, availabilityZone, arrayName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_array.%s", tfName),
+				ImportStateId: fmt.Sprintf("/arrays/%s", arrayName),
+				ExpectError:   regexp.MustCompile("invalid array import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>/arrays/<array>'"),
+			},
+		},
+	})
+}
+
 func testArrayExists(rName string, t *testing.T) resource.TestCheckFunc {
 	fullName := "fusion_array." + rName
 	return func(s *terraform.State) error {
@@ -382,13 +427,10 @@ func testArrayExists(rName string, t *testing.T) resource.TestCheckFunc {
 			return fmt.Errorf("expected type: fusion_array. Found: %s", tfArray.Type)
 		}
 		savedArray := tfArray.Primary.Attributes
-		arrayName := savedArray["name"]
-		availabilityZoneName := savedArray["availability_zone"]
-		regionName := savedArray["region"]
 
-		foundArray, _, err := testAccProvider.Meta().(*hmrest.APIClient).ArraysApi.GetArray(context.Background(), regionName, availabilityZoneName, arrayName, nil)
+		foundArray, _, err := testAccProvider.Meta().(*hmrest.APIClient).ArraysApi.GetArrayById(context.Background(), savedArray["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", savedArray["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", savedArray["name"], savedArray["id"], err)
 		}
 
 		if !utilities.CheckStrAttribute(t, "display_name", foundArray.DisplayName, savedArray["display_name"]) ||
@@ -474,17 +516,21 @@ func testAccArrayDataSource_basic(t *testing.T) {
 			// Check if they are contained in the data source
 			{
 				Config: allArraysConfig + "\n" + testArrayDataSourceConfig(dsTfName, region, availabilityZone),
-				Check: utilities.TestCheckDataSource(
+				Check: utilities.TestCheckDataSourceExact(
 					"fusion_array", dsTfName, "items", arrays,
 				),
+			},
+			{
+				Config: partialArraysConfig,
 			},
 			// Remove one array. Check if only two of them are contained in the data source
 			{
 				Config: partialArraysConfig + "\n" + testArrayDataSourceConfig(dsTfName, region, availabilityZone),
-				Check: utilities.TestCheckDataSource(
-					"fusion_array", dsTfName, "items", []map[string]interface{}{
-						arrays[0], arrays[1],
-					},
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSourceExact(
+						"fusion_array", dsTfName, "items", []map[string]interface{}{
+							arrays[0], arrays[1],
+						}),
 				),
 			},
 		},

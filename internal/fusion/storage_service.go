@@ -9,6 +9,7 @@ import (
 	context "context"
 	"fmt"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -28,20 +29,20 @@ func schemaStorageService() map[string]*schema.Schema {
 	}
 
 	return map[string]*schema.Schema{
-		"name": {
+		optionName: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the storage service.",
+			Description:  "The name of the Storage Service.",
 		},
-		"display_name": {
+		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
-			Description:  "The human name of the storage service. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Storage Service. If not provided, defaults to I(name).",
 		},
-		"hardware_types": {
+		optionHardwareTypes: {
 			Type:     schema.TypeSet,
 			Required: true,
 			MinItems: 1,
@@ -52,15 +53,18 @@ func schemaStorageService() map[string]*schema.Schema {
 					validation.StringIsNotEmpty,
 				),
 			},
-			Description: "Hardware types to which the storage service applies.",
+			Description: "Hardware types to which the Storage Service applies.",
 		},
 	}
 }
 
 // This is our entry point for the Storage Service resource
 func resourceStorageService() *schema.Resource {
-	p := &storageServiceProvider{BaseResourceProvider{ResourceKind: "StorageService"}}
-	storageServiceResourceFunctions = NewBaseResourceFunctions("StorageService", p)
+	p := &storageServiceProvider{BaseResourceProvider{ResourceKind: resourceKindStorageService}}
+	storageServiceResourceFunctions = NewBaseResourceFunctions(resourceKindStorageService, p)
+	storageServiceResourceFunctions.Resource.Description = "A Storage Service represents a type of storage that shares " +
+		"fundamental characteristics like response latency, availability, protocol, and data management features." +
+		" Placement Groups select a Storage Service to guarantee consistent snapshots and hardware affinity expectations."
 	storageServiceResourceFunctions.Resource.Schema = schemaStorageService()
 
 	return storageServiceResourceFunctions.Resource
@@ -90,15 +94,7 @@ func (vp *storageServiceProvider) ReadResource(ctx context.Context, client *hmre
 		return err
 	}
 
-	hardwareTypes := make([]string, len(ss.HardwareTypes))
-	for i, hwType := range ss.HardwareTypes {
-		hardwareTypes[i] = hwType.Name
-	}
-
-	d.Set("name", ss.Name)
-	d.Set("display_name", ss.DisplayName)
-	d.Set("hardware_types", hardwareTypes)
-	return nil
+	return vp.loadStorageService(ss, d)
 }
 
 func (vp *storageServiceProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -132,4 +128,40 @@ func (vp *storageServiceProvider) PrepareUpdate(ctx context.Context, client *hmr
 	}
 
 	return fn, patches, nil
+}
+
+func (vp *storageServiceProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{resourceGroupNameStorageService}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage_service import path. Expected path in format '/storage-services/<storage-service>'")
+	}
+
+	storageService, _, err := client.StorageServicesApi.GetStorageService(ctx, selfLinkFieldsWithValues[resourceGroupNameStorageService], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = vp.loadStorageService(storageService, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(storageService.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (vp *storageServiceProvider) loadStorageService(ss hmrest.StorageService, d *schema.ResourceData) error {
+	hardwareTypes := make([]string, len(ss.HardwareTypes))
+	for i, hwType := range ss.HardwareTypes {
+		hardwareTypes[i] = hwType.Name
+	}
+	return getFirstError(
+		d.Set(optionName, ss.Name),
+		d.Set(optionDisplayName, ss.DisplayName),
+		d.Set(optionHardwareTypes, hardwareTypes),
+	)
 }

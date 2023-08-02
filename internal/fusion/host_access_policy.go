@@ -7,9 +7,11 @@ package fusion
 
 import (
 	"context"
+	"fmt"
 
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
@@ -20,14 +22,14 @@ func schemaHostAccessPolicy() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the Host access policy.",
+			Description:  "The name of the Host Access Policy.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The human name of the Host access policy. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Host Access Policy. If not provided, defaults to I(name).",
 		},
 		optionIqn: {
 			Type:             schema.TypeString,
@@ -46,9 +48,10 @@ func schemaHostAccessPolicy() map[string]*schema.Schema {
 }
 
 func resourceHostAccessPolicy() *schema.Resource {
-	p := &hostAccessPolicyProvider{BaseResourceProvider{ResourceKind: "HostAccessPolicy"}}
-	hostAccessPolicyResourceFunctions := NewBaseResourceFunctions("HostAccessPolicy", p)
+	p := &hostAccessPolicyProvider{BaseResourceProvider{ResourceKind: resourceKindHostAccessPolicy}}
+	hostAccessPolicyResourceFunctions := NewBaseResourceFunctions(resourceKindHostAccessPolicy, p)
 
+	hostAccessPolicyResourceFunctions.Resource.Description = "Host Access Policy assigned to a volume restricts who can access it."
 	hostAccessPolicyResourceFunctions.Resource.Schema = schemaHostAccessPolicy()
 	return hostAccessPolicyResourceFunctions.Resource
 }
@@ -84,12 +87,7 @@ func (p *hostAccessPolicyProvider) ReadResource(ctx context.Context, client *hmr
 		return err
 	}
 
-	d.Set(optionName, hap.Name)
-	d.Set(optionDisplayName, hap.DisplayName)
-	d.Set(optionIqn, hap.Iqn)
-	d.Set(optionPersonality, hap.Personality)
-
-	return nil
+	return p.loadHAP(hap, d)
 }
 
 func (p *hostAccessPolicyProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -100,4 +98,37 @@ func (p *hostAccessPolicyProvider) PrepareDelete(ctx context.Context, client *hm
 		return &op, err
 	}
 	return fn, nil
+}
+
+func (p *hostAccessPolicyProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{resourceGroupNameHostAccessPolicy}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid host_access_policy import path. Expected path in format '/host-access-policies/<host-access-policy>'")
+	}
+
+	hap, _, err := client.HostAccessPoliciesApi.GetHostAccessPolicy(ctx, selfLinkFieldsWithValues[resourceGroupNameHostAccessPolicy], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadHAP(hap, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(hap.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *hostAccessPolicyProvider) loadHAP(hap hmrest.HostAccessPolicy, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, hap.Name),
+		d.Set(optionDisplayName, hap.DisplayName),
+		d.Set(optionIqn, hap.Iqn),
+		d.Set(optionPersonality, hap.Personality),
+	)
 }

@@ -23,61 +23,77 @@ func createArraySchema() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Array.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
+			Description:  "The human-readable name of the Array.",
 		},
 		optionAvailabilityZone: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of Availability Zone within which the Array is created.",
 		},
 		optionRegion: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of Region within which the Array is created.",
 		},
 		optionApplianceId: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The Appliance ID or EMS device ID of the Array.",
 		},
 		optionHostName: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The Host Name of the Array. Domain name assigned to the Array.",
 		},
 		optionHardwareType: {
 			Type:         schema.TypeString,
 			Required:     true,
-			ValidateFunc: validation.StringInSlice(HwTypes, false),
+			ValidateFunc: validation.StringInSlice(hwTypes, false),
+			Description: fmt.Sprintf("The name of the Hardware Type of the Array. E.g., %s, %s, %s, %s.",
+				hwTypeArrayX,
+				hwTypeArrayC,
+				hwTypeArrayXOptane,
+				hwTypeArrayXL),
 		},
 		optionMaintenanceMode: {
-			Type:     schema.TypeBool,
-			Optional: true,
-			Computed: true,
+			Type:        schema.TypeBool,
+			Optional:    true,
+			Computed:    true,
+			Description: "True if the Array is not ready to use.",
 		},
 		optionUnavailableMode: {
-			Type:     schema.TypeBool,
-			Optional: true,
-			Computed: true,
+			Type:        schema.TypeBool,
+			Optional:    true,
+			Computed:    true,
+			Description: "True if the Array is unavailable/unhealthy. False otherwise.",
 		},
 		optionApartmentId: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The Apartment Identifier of the Array.",
 		},
 	}
 }
 
 func resourceArray() *schema.Resource {
-	ap := &arrayProvider{BaseResourceProvider{ResourceKind: "Array"}}
-	array := NewBaseResourceFunctions("Array", ap)
+	ap := &arrayProvider{BaseResourceProvider{ResourceKind: resourceKindArray}}
+	array := NewBaseResourceFunctions(resourceKindArray, ap)
 
+	array.Resource.Description = "An Array (Asset) is the physical array. " +
+		"An Array resides in an Availability Zone. It has a Hardware Type which is an attribute of the Storage Class."
 	array.Resource.Schema = createArraySchema()
 
 	return array.Resource
@@ -182,17 +198,7 @@ func (p *arrayProvider) ReadResource(ctx context.Context, client *hmrest.APIClie
 		return err
 	}
 
-	d.Set(optionName, array.Name)
-	d.Set(optionDisplayName, array.DisplayName)
-	d.Set(optionAvailabilityZone, array.AvailabilityZone.Name)
-	d.Set(optionRegion, array.Region.Name)
-	d.Set(optionApplianceId, array.ApplianceId)
-	d.Set(optionHostName, array.HostName)
-	d.Set(optionHardwareType, array.HardwareType.Name)
-	d.Set(optionApartmentId, array.ApartmentId)
-	d.Set(optionMaintenanceMode, array.MaintenanceMode)
-	d.Set(optionUnavailableMode, array.UnavailableMode)
-	return nil
+	return p.loadArray(array, d)
 }
 
 func (p *arrayProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, []ResourcePatch, error) {
@@ -260,4 +266,47 @@ func (p *arrayProvider) PrepareDelete(ctx context.Context, client *hmrest.APICli
 		return &op, err
 	}
 	return fn, nil
+}
+
+func (p *arrayProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{
+		resourceGroupNameRegion,
+		resourceGroupNameAvailabilityZone,
+		resourceGroupNameArray,
+	}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid array import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>/arrays/<array>'")
+	}
+
+	array, _, err := client.ArraysApi.GetArray(ctx, selfLinkFieldsWithValues[resourceGroupNameRegion], selfLinkFieldsWithValues[resourceGroupNameAvailabilityZone], selfLinkFieldsWithValues[resourceGroupNameArray], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadArray(array, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(array.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *arrayProvider) loadArray(array hmrest.Array, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, array.Name),
+		d.Set(optionDisplayName, array.DisplayName),
+		d.Set(optionAvailabilityZone, array.AvailabilityZone.Name),
+		d.Set(optionRegion, array.Region.Name),
+		d.Set(optionApplianceId, array.ApplianceId),
+		d.Set(optionHostName, array.HostName),
+		d.Set(optionHardwareType, array.HardwareType.Name),
+		d.Set(optionApartmentId, array.ApartmentId),
+		d.Set(optionMaintenanceMode, array.MaintenanceMode),
+		d.Set(optionUnavailableMode, array.UnavailableMode),
+	)
 }

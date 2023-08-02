@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -27,29 +28,31 @@ func schemaTenantSpace() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the tenant space.",
+			Description:  "The name of the Tenant Space.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
-			Description:  "The human name of the tenant space. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Tenant Space. If not provided, defaults to I(name).",
 		},
 		optionTenant: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the tenant.",
+			Description:  "The name of the Tenant.",
 		},
 	}
 }
 
 // This is our entry point for the Tenant Space resource
 func resourceTenantSpace() *schema.Resource {
-	p := &tenantSpaceProvider{BaseResourceProvider{ResourceKind: "TenantSpace"}}
+	p := &tenantSpaceProvider{BaseResourceProvider{ResourceKind: resourceKindTenantSpace}}
 
-	tenantSpaceResourceFunctions := NewBaseResourceFunctions("TenantSpace", p)
+	tenantSpaceResourceFunctions := NewBaseResourceFunctions(resourceKindTenantSpace, p)
+	tenantSpaceResourceFunctions.Resource.Description = `A Tenant Space (e.g. "Wiki") contains resources ` +
+		`(Volumes, Volume Snapshots, etc.) and exists inside a Tenant.`
 	tenantSpaceResourceFunctions.Resource.Schema = schemaTenantSpace()
 
 	return tenantSpaceResourceFunctions.Resource
@@ -79,10 +82,7 @@ func (p *tenantSpaceProvider) ReadResource(ctx context.Context, client *hmrest.A
 		return err
 	}
 
-	d.Set(optionName, ts.Name)
-	d.Set(optionDisplayName, ts.DisplayName)
-	d.Set(optionTenant, ts.Tenant.Name)
-	return nil
+	return p.loadTenantSpace(ts, d)
 }
 
 func (p *tenantSpaceProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -119,4 +119,39 @@ func (p *tenantSpaceProvider) PrepareUpdate(ctx context.Context, client *hmrest.
 	}
 
 	return fn, patches, nil
+}
+
+func (p *tenantSpaceProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{
+		resourceGroupNameTenant,
+		resourceGroupNameTenantSpace,
+	}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant_space import path. Expected path in format '/tenants/<tenant>/tenant-spaces/<tenant-space>'")
+	}
+
+	tenantSpace, _, err := client.TenantSpacesApi.GetTenantSpace(ctx, selfLinkFieldsWithValues[resourceGroupNameTenant], selfLinkFieldsWithValues[resourceGroupNameTenantSpace], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadTenantSpace(tenantSpace, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(tenantSpace.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *tenantSpaceProvider) loadTenantSpace(ts hmrest.TenantSpace, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, ts.Name),
+		d.Set(optionDisplayName, ts.DisplayName),
+		d.Set(optionTenant, ts.Tenant.Name),
+	)
 }

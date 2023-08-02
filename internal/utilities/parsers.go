@@ -6,8 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 package utilities
 
 import (
+	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -53,4 +55,22 @@ func ConvertDataUnitsToInt64(number string, factor int) (int64, error) {
 	convertedNumber, _ := strconv.ParseInt(number[:len(number)-1], 10, 64)
 
 	return convertedNumber * int64(math.Pow(float64(factor), float64(suffixes[suffix]))), nil
+}
+
+// Generic function for parsing self links.
+// We assume that this helper function is called with ordered list of resource group names
+func ParseSelfLink(selfLink string, orderedRequiredGroupNamesInPath []string) (map[string]string, error) {
+	err := fmt.Errorf("self link has incorrect format")
+	parts := strings.Split(selfLink, "/")
+	if len(parts)%2 == 0 || (len(parts)-1)/2 != len(orderedRequiredGroupNamesInPath) || parts[0] != "" {
+		return nil, err
+	}
+	fieldsWithValues := make(map[string]string)
+	for orderOfGroup, groupName := range orderedRequiredGroupNamesInPath {
+		if groupName != parts[orderOfGroup*2+1] || parts[orderOfGroup*2+2] == "" {
+			return nil, err
+		}
+		fieldsWithValues[groupName] = parts[orderOfGroup*2+2]
+	}
+	return fieldsWithValues, nil
 }

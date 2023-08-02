@@ -17,6 +17,8 @@ import (
 
 // Contains correct list of Regions
 func TestAccRegionDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("region_ds_test")
 	regionsCount := 3
 	regions := make([]map[string]interface{}, regionsCount)
@@ -52,11 +54,17 @@ func TestAccRegionDataSource_basic(t *testing.T) {
 				Config: allConfigs + "\n" + testRegionDataSourceConfig(dsNameConfig),
 				Check:  utilities.TestCheckDataSource("fusion_region", dsNameConfig, "items", regions),
 			},
+			{
+				Config: partialConfig,
+			},
 			// Remove one region. Check if only two of them are contained in the data source
 			{
 				Config: partialConfig + "\n" + testRegionDataSourceConfig(dsNameConfig),
-				Check: utilities.TestCheckDataSource(
-					"fusion_region", dsNameConfig, "items", []map[string]interface{}{regions[0], regions[1]},
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSource(
+						"fusion_region", dsNameConfig, "items", []map[string]interface{}{regions[0], regions[1]},
+					),
+					utilities.TestCheckDataSourceNotHave("fusion_region", dsNameConfig, "items", []map[string]interface{}{regions[2]}),
 				),
 			},
 		},

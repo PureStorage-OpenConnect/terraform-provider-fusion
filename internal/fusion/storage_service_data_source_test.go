@@ -17,6 +17,8 @@ import (
 
 // Contains correct list of Storage Services
 func TestAccStorageServiceDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("storage_service_ds_test")
 	storageServiceCount := 3
 	storageServices := make([]map[string]interface{}, storageServiceCount)
@@ -56,13 +58,23 @@ func TestAccStorageServiceDataSource_basic(t *testing.T) {
 					"fusion_storage_service", dsNameConfig, "items", storageServices,
 				),
 			},
+			{
+				Config: partialStorageServicesConfig,
+			},
 			// Remove one storage service. Check if only two of them are contained in the data source
 			{
 				Config: partialStorageServicesConfig + "\n" + testStorageServiceDataSourceConfig(dsNameConfig),
-				Check: utilities.TestCheckDataSource(
-					"fusion_storage_service", dsNameConfig, "items", []map[string]interface{}{
-						storageServices[0], storageServices[1],
-					},
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSource(
+						"fusion_storage_service", dsNameConfig, "items", []map[string]interface{}{
+							storageServices[0], storageServices[1],
+						},
+					),
+					utilities.TestCheckDataSourceNotHave(
+						"fusion_storage_service", dsNameConfig, "items", []map[string]interface{}{
+							storageServices[2],
+						},
+					),
 				),
 			},
 		},

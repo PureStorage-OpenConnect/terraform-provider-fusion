@@ -18,7 +18,7 @@ Learn More:
 
 * Fusion credentials
 
-In order to access the fusion API, you will need the required credentials and configuration.  Namely you will need the `host`, `private_key_file`, and `issuer_id`.  These need to be specified in the provider block in your terraform configuration.  Alternatively, these values can also be supplied using the environment variables: `FUSION_HOST`, `FUSION_PRIVATE_KEY_FILE` and `FUSION_ISSUER_ID`
+In order to access the fusion API, you will need the required credentials and configuration.  Namely you will need the `api_host`, `private_key_file`, and `issuer_id`.  These need to be specified in the provider block in your terraform configuration.  Alternatively, these values can also be supplied using the environment variables: `FUSION_API_HOST`, `FUSION_PRIVATE_KEY_FILE` and `FUSION_ISSUER_ID`
 
 ## Using the provider
 
@@ -49,15 +49,30 @@ Then the logs will be located at /tmp/terraform-log.gz
 
 ## Developing on the provider
 
-If you want to run the tests, you need to set some environment variables.
-  - `FUSION_HOST=http://your-fusion-control-plane:8080` This needs to be set to your controlplane endpoint
+Unit tests can be run like normal go tests, for example:
+```
+go test ./... -v
+```
+
+> :warning: **Caution! Acceptance tests may wipe your data or delete Fusion infrastructure!**
+
+To run acceptance tests, you must have pre-created infrastructure:
+  - Region
+  - Availability Zone in this Region (All resources which depend on this AZ will be deleted)
+  - At least one array in this Availability Zone
+  
+You also need to set environment variables.
+  - `FUSION_API_HOST=http://your-fusion-control-plane:8080` This needs to be set to your controlplane endpoint
   - `FUSION_ISSUER_ID=pure1:apikey:abcdefghigjlkmnop` Set this to your fusion issuer ID
   - `FUSION_PRIVATE_KEY_FILE=/tmp/your-fusion-key.pem` Set this to the path of your fusion private key file
+  - `FUSION_CONFIG=<path-to-your-fusion-config>` Set this to the path of your fusion config file
+  - `TEST_EXISTING_REGION=<name-of-pre-created-az>` Set this to to the pre-created region name. By default `pure-us-west`
+  - `TEST_EXISTING_AVAILABILITY_ZONE=<name-of-pre-created-az>` Set this to the pre-created availability zone name. By default `az1`
 
-Test can be run like normal go tests, for example:
-
-    FUSION_HOST=http://your-fusion-control-plane:8080 FUSION_ISSUER_ID=pure1:apikey:abcdefghigjlkmnop FUSION_PRIVATE_KEY_FILE=/tmp/your-fusion-key.pem make testacc
-
+Acceptance test can be run with `go test` using `TF_ACC` environment variable: 
+```
+TF_ACC=1 go test ./... -v -timeout 0
+```
 
 [terraform-install]: https://www.terraform.io/downloads.html
 [terraform-github]: https://github.com/hashicorp/terraform

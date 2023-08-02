@@ -1,5 +1,5 @@
 provider "fusion" {
-    host             = var.hm_url
+    api_host         = var.hm_url
     issuer_id        = var.issuer_id
     private_key_file = var.private_key
 }
@@ -7,7 +7,7 @@ provider "fusion" {
 resource "fusion_tenant_space" "fts" {
   name         = var.tenant_space_name
   display_name = var.tenant_space_display_name
-  tenant_name  = var.tenant_name
+  tenant       = var.tenant_name
 }
 
 resource "fusion_host_access_policy" "host_access_policy" {
@@ -20,10 +20,10 @@ resource "fusion_host_access_policy" "host_access_policy" {
 resource "fusion_placement_group" "placement_group" {
   name                   = "pg-name"
   display_name           = "pg-display-name"
-  tenant_name            = var.tenant_name
-  tenant_space_name      = fusion_tenant_space.fts.name
-  region_name            = var.region_name
-  availability_zone_name = var.availability_zone
-  storage_service_name   = var.storage_service
+  tenant                 = var.tenant_name
+  tenant_space           = fusion_tenant_space.fts.name
+  region                 = var.region_name
+  availability_zone      = var.availability_zone
+  storage_service        = var.storage_service
 }
 

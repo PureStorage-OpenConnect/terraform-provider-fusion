@@ -28,12 +28,12 @@ func dataSourceHardwareType() *schema.Resource {
 		optionArrayType: {
 			Type:        schema.TypeString,
 			Optional:    true,
-			Description: "Hardware type array type",
+			Description: "The array type of the Hardware Type.",
 		},
 		optionMediaType: {
 			Type:        schema.TypeString,
 			Optional:    true,
-			Description: "Hardware type media type",
+			Description: "The media type of the Hardware Type",
 		},
 		optionItems: {
 			Type:     schema.TypeList,
@@ -50,24 +50,27 @@ func dataSourceHardwareType() *schema.Resource {
 						Type:         schema.TypeString,
 						Optional:     true,
 						ValidateFunc: validation.StringIsNotEmpty,
-						Description:  "The human name of the hardware type. If not provided, defaults to I(name).",
+						Description:  "The human-readable name of the Hardware Type. If not provided, defaults to I(name).",
 					},
 					optionArrayType: {
 						Type:        schema.TypeString,
 						Required:    true,
-						Description: "Hardware type array type",
+						Description: "The array type of the Hardware Type.",
 					},
 					optionMediaType: {
 						Type:        schema.TypeString,
 						Required:    true,
-						Description: "Hardware type media type",
+						Description: "The media type of the Hardware Type",
 					},
 				},
 			},
+			Description: "List of matching Hardware Types.",
 		},
 	}
 
-	hardwareTypeDataSourceFunctions := NewBaseDataSourceFunctions("HardwareType", ds, dsSchema)
+	hardwareTypeDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindHardwareType, ds, dsSchema)
+	// Override default description as there's no resource for this data source.
+	hardwareTypeDataSourceFunctions.Resource.Description = "Provides details about any Hardware Type matching the given parameters."
 	return hardwareTypeDataSourceFunctions.Resource
 }
 

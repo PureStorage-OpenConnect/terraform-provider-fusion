@@ -26,10 +26,11 @@ func dataSourceHostAccessPolicy() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaHostAccessPolicy(),
 			},
+			Description: "List of matching Host Access Policies.",
 		},
 	}
 
-	hostAccessPolicyDataSourceFunctions := NewBaseDataSourceFunctions("HostAccessPolicy", ds, dsSchema)
+	hostAccessPolicyDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindHostAccessPolicy, ds, dsSchema)
 
 	return hostAccessPolicyDataSourceFunctions.Resource
 }

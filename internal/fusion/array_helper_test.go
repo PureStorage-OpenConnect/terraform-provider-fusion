@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
+	"github.com/antihax/optional"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 )
 
@@ -64,23 +66,23 @@ func poachArrays(ctx context.Context, t *testing.T, arrayCount int) (poachedArra
 
 	tflog.Trace(ctx, "poaching arrays for tests", "count", arrayCount)
 
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
+	hmClient, err := newTestHMClient(ctx, testURL, testIssuer, testPrivKey, testPrivKeyPassword)
 	if err != nil {
 		tflog.Error(ctx, "failed to create Fusion API client", "error", err)
-		t.Fatalf("NewHMClient(): %v", err)
+		t.Fatalf("newTestHMClient(): %v", err)
 	}
 
 	prepareTestingEnvironment(t, ctx, hmClient)
 
-	list, _, err := hmClient.ArraysApi.ListArrays(ctx, optionPreexistingRegion, optionPreexistingAvailabilityZone, nil)
+	list, _, err := hmClient.ArraysApi.ListArrays(ctx, preexistingRegion, preexistingAvailabilityZone, nil)
 	if err != nil {
 		tflog.Error(ctx, "hmClient.ArraysApi.ListArrays()", "error", err)
 		t.Fatalf("hmClient.ArraysApi.ListArrays(): %v", err)
 	}
-	tflog.Trace(ctx, "trying to poach arrays for tests", "region", optionPreexistingRegion, "availability_zone", optionPreexistingAvailabilityZone, "found_arrays", len(list.Items), "need_arrays", arrayCount)
+	tflog.Trace(ctx, "trying to poach arrays for tests", "region", preexistingRegion, "availability_zone", preexistingAvailabilityZone, "found_arrays", len(list.Items), "need_arrays", arrayCount)
 	if len(list.Items) < arrayCount {
 		tflog.Error(ctx, "not enough arrays to poach for tests", "need", arrayCount, "got", len(list.Items))
-		t.Fatalf("%v/%v does not have enough arrays to poach for tests (%v < %v)", optionPreexistingRegion, optionPreexistingAvailabilityZone, len(list.Items), arrayCount)
+		t.Fatalf("%v/%v does not have enough arrays to poach for tests (%v < %v)", preexistingRegion, preexistingAvailabilityZone, len(list.Items), arrayCount)
 	}
 
 	wg := &sync.WaitGroup{}
@@ -112,14 +114,14 @@ func poachOneArray(ctx context.Context, hmClient *hmrest.APIClient, arrayIdx int
 
 	tflog.Trace(ctx, "poaching array for tests", "idx", arrayIdx, "name", src.Name, "appliance_id", src.ApplianceId, "host_name", src.HostName, "hardware_type", src.HardwareType.Name, "display_name", displayName, "apartment_id", src.ApartmentId)
 
-	op, _, err := hmClient.ArraysApi.DeleteArray(ctx, optionPreexistingRegion, optionPreexistingAvailabilityZone, src.Name, nil)
+	op, _, err := hmClient.ArraysApi.DeleteArray(ctx, preexistingRegion, preexistingAvailabilityZone, src.Name, nil)
 	if err != nil {
-		tflog.Error(ctx, "hmClient.ArraysApi.DeleteArray()", "region", optionPreexistingRegion, "availability-zone", optionPreexistingAvailabilityZone, "name", src.Name, "error", err)
+		tflog.Error(ctx, "hmClient.ArraysApi.DeleteArray()", "region", preexistingRegion, "availability-zone", preexistingAvailabilityZone, "name", src.Name, "error", err)
 		fail.SetFatal(fmt.Errorf("hmClient.ArraysApi.DeleteArray(%v): %w", src.Name, err))
 		return
 	}
 
-	tflog.Trace(ctx, "created poaching operation", "region", optionPreexistingRegion, "availability_zone", optionPreexistingAvailabilityZone, "name", src.Name, "operation_id", op.Id)
+	tflog.Trace(ctx, "created poaching operation", "region", preexistingRegion, "availability_zone", preexistingAvailabilityZone, "name", src.Name, "operation_id", op.Id)
 
 	if succeeded, err := utilities.WaitOnOperation(ctx, &op, hmClient); err != nil || !succeeded {
 		fail.SetFatal(fmt.Errorf("hmClient.ArraysApi.DeleteArray(%v): wait call error %v / op error %v", src.Name, err, getOperationError(&op)))
@@ -143,10 +145,10 @@ func poachOneArray(ctx context.Context, hmClient *hmrest.APIClient, arrayIdx int
 func releasePoachedArrays(ctx context.Context, t *testing.T, poachedArrays []ArrayTestData) {
 	tflog.Trace(ctx, "returning poached arrays back to their original AZ", "count", len(poachedArrays))
 
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
+	hmClient, err := newTestHMClient(ctx, testURL, testIssuer, testPrivKey, testPrivKeyPassword)
 	if err != nil {
 		tflog.Error(ctx, "failed to create Fusion API client", "error", err)
-		t.Fatalf("NewHMClient(): %v", err)
+		t.Fatalf("newTestHMClient(): %v", err)
 	}
 
 	wg := &sync.WaitGroup{}
@@ -179,7 +181,7 @@ func releaseOneArray(ctx context.Context, hmClient *hmrest.APIClient, arrayIdx i
 		HostName:     array.HostName,
 		HardwareType: array.HardwareType,
 		ApplianceId:  array.ApplianceId,
-	}, optionPreexistingRegion, optionPreexistingAvailabilityZone, nil)
+	}, preexistingRegion, preexistingAvailabilityZone, nil)
 	if err != nil {
 		tflog.Error(ctx, "hmClient.ArraysApi.CreateArray()", "error", err)
 		fail.SetFatal(fmt.Errorf("hmClient.ArraysApi.CreateArray(%v): %v", *array.Name, err))
@@ -191,7 +193,7 @@ func releaseOneArray(ctx context.Context, hmClient *hmrest.APIClient, arrayIdx i
 		return
 	}
 
-	createdArray, _, err := hmClient.ArraysApi.GetArray(ctx, optionPreexistingRegion, optionPreexistingAvailabilityZone, *array.Name, nil)
+	createdArray, _, err := hmClient.ArraysApi.GetArray(ctx, preexistingRegion, preexistingAvailabilityZone, *array.Name, nil)
 	if err != nil {
 		tflog.Error(ctx, "hmClient.ArraysApi.GetArray()", "error", err)
 		fail.SetFatal(fmt.Errorf("hmClient.ArraysApi.GetArray(%v): %v", *array.Name, err))
@@ -211,7 +213,7 @@ func releaseOneArray(ctx context.Context, hmClient *hmrest.APIClient, arrayIdx i
 	}
 
 	for _, patch := range patches {
-		op, _, err = hmClient.ArraysApi.UpdateArray(ctx, patch, optionPreexistingRegion, optionPreexistingAvailabilityZone, *array.Name, nil)
+		op, _, err = hmClient.ArraysApi.UpdateArray(ctx, patch, preexistingRegion, preexistingAvailabilityZone, *array.Name, nil)
 		if err != nil {
 			tflog.Error(ctx, "hmClient.ArraysApi.UpdateArray()", "error", err)
 			fail.SetFatal(fmt.Errorf("hmClient.ArraysApi.UpdateArray(%v): %v", *array.Name, err))
@@ -287,9 +289,9 @@ func prepareTestingEnvironment(t *testing.T, ctx context.Context, hmClient *hmre
 	// await until there actually are visible three arrays
 	var arrays hmrest.ArrayList
 	var err error
-	arrays, _, err = hmClient.ArraysApi.ListArrays(ctx, optionPreexistingRegion, optionPreexistingAvailabilityZone, nil)
+	arrays, _, err = hmClient.ArraysApi.ListArrays(ctx, preexistingRegion, preexistingAvailabilityZone, nil)
 	if err != nil {
-		t.Fatalf("hmClient.TenantSpacesApi.ListArrays(%v, %v): %v", optionPreexistingRegion, optionPreexistingAvailabilityZone, err)
+		t.Fatalf("hmClient.TenantSpacesApi.ListArrays(%v, %v): %v", preexistingRegion, preexistingAvailabilityZone, err)
 	}
 
 	// TODO: remove once HM-5548 is fixed
@@ -338,12 +340,25 @@ func prepareTestingEnvironment(t *testing.T, ctx context.Context, hmClient *hmre
 			for _, volume := range volumes.Items {
 				tflog.Debug(ctx, "cleaning up dangling volume", "name", volume.Name)
 				op, _, err := hmClient.VolumesApi.UpdateVolume(ctx, hmrest.VolumePatch{
+					HostAccessPolicies: &hmrest.NullableString{Value: ""},
+				}, tenant.Name, tenantSpace.Name, volume.Name, nil)
+				utilities.TraceError(ctx, err)
+				if err != nil {
+					t.Fatalf("hmClient.VolumesApi.UpdateVolume(%v, destroyed=true): %v", volume.Name, err)
+				}
+
+				succeeded, err := utilities.WaitOnOperation(ctx, &op, hmClient)
+				if err != nil || !succeeded {
+					t.Fatalf("hmClient.VolumesApi.UpdateVolume(%v, host_access_policies=[]): call error %v / op error %v", volume.Name, err, getOperationError(&op))
+				}
+
+				op, _, err = hmClient.VolumesApi.UpdateVolume(ctx, hmrest.VolumePatch{
 					Destroyed: &hmrest.NullableBoolean{Value: true},
 				}, tenant.Name, tenantSpace.Name, volume.Name, nil)
 				if err != nil {
 					t.Fatalf("hmClient.VolumesApi.UpdateVolume(%v, destroyed=true): %v", volume.Name, err)
 				}
-				succeeded, err := utilities.WaitOnOperation(ctx, &op, hmClient)
+				succeeded, err = utilities.WaitOnOperation(ctx, &op, hmClient)
 				if err != nil || !succeeded {
 					t.Fatalf("hmClient.VolumesApi.UpdateVolume(%v, destroyed=true): call error %v / op error %v", volume.Name, err, getOperationError(&op))
 				}
@@ -378,6 +393,19 @@ func prepareTestingEnvironment(t *testing.T, ctx context.Context, hmClient *hmre
 				t.Fatalf("hmClient.PlacementGroupsApi.ListPlacementGroups(%v, %v): %v", tenant.Name, tenantSpace.Name, err)
 			}
 			for _, placementGroup := range placementGroups.Items {
+				tenantName := placementGroup.Tenant.Name
+				tenantSpaceName := placementGroup.TenantSpace.Name
+
+				tflog.Debug(ctx, "Destroying relevant snapshots if they exist", optionTenant, tenantName, optionTenantSpace, tenantSpaceName)
+				snapshots, _, err := hmClient.SnapshotsApi.ListSnapshots(ctx, tenantName, tenantSpaceName, &hmrest.SnapshotsApiListSnapshotsOpts{
+					PlacementGroup: optional.NewString(placementGroup.Name),
+				})
+
+				if err == nil && len(snapshots.Items) > 0 {
+					tflog.Info(ctx, "Deleting Snapshots in order to delete Placement Group", "placement_group", placementGroup.Name)
+					deleteSnapshots(ctx, &snapshots, hmClient)
+				}
+
 				tflog.Debug(ctx, "cleaning up placement group", "name", placementGroup.Name)
 				startedAt := time.Now()
 				removed := false
@@ -410,6 +438,7 @@ func prepareTestingEnvironment(t *testing.T, ctx context.Context, hmClient *hmre
 func awaitAllOperations(ctx context.Context, hmClient *hmrest.APIClient) error {
 	var wg = &sync.WaitGroup{}
 	awaitOp := func(op hmrest.Operation) {
+		defer wg.Done()
 		// this is intentionally silent and does not log anything
 		for op.Status != "Succeeded" && op.Status != "Failed" {
 			delay := time.Duration(op.RetryIn) * time.Millisecond
@@ -420,7 +449,6 @@ func awaitAllOperations(ctx context.Context, hmClient *hmrest.APIClient) error {
 			}
 			op = newOp
 		}
-		wg.Done()
 	}
 
 	ops, _, err := hmClient.OperationsApi.ListOperations(ctx, nil)

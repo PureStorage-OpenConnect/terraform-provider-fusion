@@ -27,10 +27,11 @@ func dataSourceRegion() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaRegion(),
 			},
+			Description: "List of matching Regions.",
 		},
 	}
 
-	regionDataSourceFunctions := NewBaseDataSourceFunctions("Region", ds, dsSchema)
+	regionDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindRegion, ds, dsSchema)
 
 	return regionDataSourceFunctions.Resource
 }

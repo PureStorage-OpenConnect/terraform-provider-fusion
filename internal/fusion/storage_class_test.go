@@ -30,11 +30,14 @@ var (
 
 // Creates and destroys
 func TestAccStorageClass_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_class_test")
 	rName := "fusion_storage_class." + rNameConfig
 	displayName := acctest.RandomWithPrefix("storage-class-display-name")
 	storageClassName := acctest.RandomWithPrefix("storage-class-name")
-	storageServiceName := testAccStorageService
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -43,7 +46,7 @@ func TestAccStorageClass_basic(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Storage Class and validate it's fields
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName),
@@ -59,12 +62,16 @@ func TestAccStorageClass_basic(t *testing.T) {
 }
 
 func TestAccStorageClass_units(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_class_test")
 	rName := "fusion_storage_class." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-class-display-name")
 	displayName2 := acctest.RandomWithPrefix("storage-class-display-name")
 	storageClassName := acctest.RandomWithPrefix("storage-class-name")
-	storageServiceName := testAccStorageService
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
+
 	unitsBandwidthLimit := "100G"
 	unitsIopsLimit := "100K"
 	unitsSizeLimit := "1G"
@@ -79,7 +86,7 @@ func TestAccStorageClass_units(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Storage Class and validate it's fields
 			{
-				Config: testStorageClassConfigWithUnits(rNameConfig, storageClassName, displayName1, storageServiceName, unitsSizeLimit, unitsIopsLimit, unitsBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfigWithUnits(rNameConfig, storageClassName, displayName1, storageServiceName, unitsSizeLimit, unitsIopsLimit, unitsBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
@@ -92,7 +99,7 @@ func TestAccStorageClass_units(t *testing.T) {
 			},
 			// Check if update works with numeric values
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, numericSizeLimit, numericIopsLimit, numericBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, numericSizeLimit, numericIopsLimit, numericBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName2),
@@ -105,7 +112,7 @@ func TestAccStorageClass_units(t *testing.T) {
 			},
 			// Check if update works with unit values
 			{
-				Config: testStorageClassConfigWithUnits(rNameConfig, storageClassName, displayName1, storageServiceName, unitsSizeLimit, unitsIopsLimit, unitsBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfigWithUnits(rNameConfig, storageClassName, displayName1, storageServiceName, unitsSizeLimit, unitsIopsLimit, unitsBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
@@ -122,12 +129,15 @@ func TestAccStorageClass_units(t *testing.T) {
 
 // Updates display name
 func TestAccStorageClass_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_class_test")
 	rName := "fusion_storage_class." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-class-display-name")
 	displayName2 := acctest.RandomWithPrefix("storage-class-display-name")
 	storageClassName := acctest.RandomWithPrefix("storage-class-name")
-	storageServiceName := testAccStorageService
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -136,7 +146,7 @@ func TestAccStorageClass_update(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Storage Class and validate it's fields
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
@@ -149,7 +159,7 @@ func TestAccStorageClass_update(t *testing.T) {
 			},
 			// Update the display name, assert that the tf resource got updated, then assert the backend shows the same
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", storageClassName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName2),
@@ -162,23 +172,23 @@ func TestAccStorageClass_update(t *testing.T) {
 			},
 			//Can't update certain values
 			{
-				Config:      testStorageClassConfig(rNameConfig, storageClassName, displayName2, "immutable", testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config:      storageServiceConfig + testStorageClassConfigWithNames(rNameConfig, storageClassName, displayName2, "immutable", testSizeLimit, testIopsLimit, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			{
-				Config:      testStorageClassConfig(rNameConfig, "immutable", displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config:      storageServiceConfig + testStorageClassConfig(rNameConfig, "immutable", displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			{
-				Config:      testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit+1024, testIopsLimit, testBandwidthLimit),
+				Config:      storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit+1024, testIopsLimit, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			{
-				Config:      testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit+10, testBandwidthLimit),
+				Config:      storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit+10, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 			{
-				Config:      testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit+10),
+				Config:      storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName2, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit+10),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 		},
@@ -186,6 +196,8 @@ func TestAccStorageClass_update(t *testing.T) {
 }
 
 func TestAccStorageClass_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig1 := acctest.RandomWithPrefix("storage_class_test")
 	rName1 := "fusion_storage_class." + rNameConfig1
 
@@ -196,7 +208,8 @@ func TestAccStorageClass_attributes(t *testing.T) {
 	displayName2 := acctest.RandomWithPrefix("storage-class-display-name")
 	storageClassName1 := acctest.RandomWithPrefix("storage-class-name")
 	storageClassName2 := acctest.RandomWithPrefix("storage-class-name")
-	storageServiceName := testAccStorageService
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -205,18 +218,18 @@ func TestAccStorageClass_attributes(t *testing.T) {
 		Steps: []resource.TestStep{
 			// TODO: Do name validations in the schema
 			{
-				Config:      testStorageClassConfig(rNameConfig1, "bad name", displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config:      storageServiceConfig + testStorageClassConfig(rNameConfig1, "bad name", displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("name must use alphanumeric characters"),
 			},
 			// Create without display_name then update
 			{
-				Config: testStorageClassConfigNoDisplayName(rNameConfig1, storageClassName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfigNoDisplayName(rNameConfig1, storageClassName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					testStorageClassExists(rName1),
 				),
 			},
 			{
-				Config: testStorageClassConfig(rNameConfig1, storageClassName1, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig1, storageClassName1, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName1, "display_name", displayName1),
 					testStorageClassExists(rName1),
@@ -224,7 +237,7 @@ func TestAccStorageClass_attributes(t *testing.T) {
 			},
 			// Create without units
 			{
-				Config: testStorageClassConfigWithoutUnits(rNameConfig2, storageClassName2, displayName2, storageServiceName),
+				Config: storageServiceConfig + testStorageClassConfigWithoutUnits(rNameConfig2, storageClassName2, displayName2, storageServiceName),
 				Check: resource.ComposeTestCheckFunc(
 					testStorageClassExists(rName2),
 					resource.TestCheckResourceAttr(rName2, "name", storageClassName2),
@@ -240,11 +253,14 @@ func TestAccStorageClass_attributes(t *testing.T) {
 }
 
 func TestAccStorageClass_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
 	rName := "fusion_storage_class." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-service-display-name")
 	storageClassName := acctest.RandomWithPrefix("storage-class-name")
-	storageServiceName := testAccStorageService
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
 
 	rNameConfig2 := acctest.RandomWithPrefix("storage_class_test2")
 	rName2 := "fusion_storage_class." + rNameConfig
@@ -258,7 +274,7 @@ func TestAccStorageClass_multiple(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Sanity check two can be created at once
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit) + "\n" +
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit) + "\n" +
 					testStorageClassConfig(rNameConfig2, storageClassName2, displayName2, storageServiceName, testSizeLimit+512, testIopsLimit+10, testBandwidthLimit+10),
 				Check: resource.ComposeTestCheckFunc(
 					testStorageClassExists(rName),
@@ -267,7 +283,7 @@ func TestAccStorageClass_multiple(t *testing.T) {
 			},
 			// Create two with same name
 			{
-				Config: testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit) + "\n" +
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName1, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit) + "\n" +
 					testStorageClassConfig(rNameConfig2, storageClassName2, displayName2, storageServiceName, testSizeLimit+512, testIopsLimit+10, testBandwidthLimit+10) + "\n" +
 					testStorageClassConfig("conflictRN", storageClassName, "conflictDN", storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
 				ExpectError: regexp.MustCompile("already exists"),
@@ -289,7 +305,7 @@ func testStorageClassExists(rName string) resource.TestCheckFunc {
 
 		goclientStorageClass, _, err := testAccProvider.Meta().(*hmrest.APIClient).StorageClassesApi.GetStorageClassById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 
 		bandwidthLimit, err := utilities.ConvertDataUnitsToInt64(attrs["bandwidth_limit"], 1024)
@@ -338,17 +354,67 @@ func testCheckStorageClassDestroy(s *terraform.State) error {
 	return nil
 }
 
+func TestAccStorageClass_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("storage_class_test")
+	rName := "fusion_storage_class." + rNameConfig
+	displayName := acctest.RandomWithPrefix("storage-class-display-name")
+	storageClassName := acctest.RandomWithPrefix("storage-class-name")
+	storageServiceName := acctest.RandomWithPrefix("storage-service-name")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageServiceName, storageServiceName, []string{"flash-array-x"})
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckStorageClassDestroy,
+		Steps: []resource.TestStep{
+			// Create Storage Class and validate it's fields
+			{
+				Config: storageServiceConfig + testStorageClassConfig(rNameConfig, storageClassName, displayName, storageServiceName, testSizeLimit, testIopsLimit, testBandwidthLimit),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", storageClassName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "storage_service", storageServiceName),
+					resource.TestCheckResourceAttr(rName, "size_limit", strconv.Itoa(testSizeLimit)),
+					resource.TestCheckResourceAttr(rName, "iops_limit", strconv.Itoa(testIopsLimit)),
+					resource.TestCheckResourceAttr(rName, "bandwidth_limit", strconv.Itoa(testBandwidthLimit)),
+					testStorageClassExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_storage_class.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/storage-services/%[1]s/storage-classes/%[2]s", storageServiceName, storageClassName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_class.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/storage-services/%[1]s/storage-classes/wrong-%[2]s", storageServiceName, storageClassName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_class.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("storage-classes/%[2]s", storageServiceName, storageClassName),
+				ExpectError:   regexp.MustCompile("invalid storage_class import path. Expected path in format '/storage-services/<storage-service>/storage-classes/<storage-class>'"),
+			},
+		},
+	})
+}
+
 func testStorageClassConfigWithoutUnits(rName, storageClassName, displayName, storageServiceName string) string {
 	return fmt.Sprintf(`
 	resource "fusion_storage_class" "%[1]s" {
 		name			= "%[2]s"
 		display_name	= "%[3]s"
-		storage_service	= "%[4]s"
+		storage_service	= fusion_storage_service.%[4]s.name
 	}
 	`, rName, storageClassName, displayName, storageServiceName)
 }
 
-func testStorageClassConfig(rName, storageClassName, displayName, storageServiceName string, sizeLimit, iopsLimit, bandwidthLimit int) string {
+func testStorageClassConfigWithNames(rName, storageClassName, displayName, storageServiceName string, sizeLimit, iopsLimit, bandwidthLimit int) string {
 	return fmt.Sprintf(`
 	resource "fusion_storage_class" "%[1]s" {
 		name			= "%[2]s"
@@ -361,12 +427,25 @@ func testStorageClassConfig(rName, storageClassName, displayName, storageService
 	`, rName, storageClassName, displayName, storageServiceName, sizeLimit, iopsLimit, bandwidthLimit)
 }
 
+func testStorageClassConfig(rName, storageClassName, displayName, storageServiceName string, sizeLimit, iopsLimit, bandwidthLimit int) string {
+	return fmt.Sprintf(`
+	resource "fusion_storage_class" "%[1]s" {
+		name			= "%[2]s"
+		display_name	= "%[3]s"
+		storage_service	= fusion_storage_service.%[4]s.name
+		size_limit		= "%[5]d"
+		iops_limit		= "%[6]d"
+		bandwidth_limit	= "%[7]d"
+	}
+	`, rName, storageClassName, displayName, storageServiceName, sizeLimit, iopsLimit, bandwidthLimit)
+}
+
 func testStorageClassConfigWithUnits(rName, storageClassName, displayName, storageServiceName, sizeLimit, iopsLimit, bandwidthLimit string) string {
 	return fmt.Sprintf(`
 	resource "fusion_storage_class" "%[1]s" {
 		name			= "%[2]s"
 		display_name	= "%[3]s"
-		storage_service	= "%[4]s"
+		storage_service	= fusion_storage_service.%[4]s.name
 		size_limit		= "%[5]s"
 		iops_limit		= "%[6]s"
 		bandwidth_limit	= "%[7]s"
@@ -378,7 +457,7 @@ func testStorageClassConfigNoDisplayName(rName, storageClassName, storageService
 	return fmt.Sprintf(`
 	resource "fusion_storage_class" "%[1]s" {
 		name      		= "%[2]s"
-		storage_service	= "%[3]s"
+		storage_service	= fusion_storage_service.%[3]s.name
 		size_limit      = "%[4]d"
 		iops_limit      = "%[5]d"
 		bandwidth_limit = "%[6]d"

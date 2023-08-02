@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -23,6 +24,8 @@ import (
 
 // Creates and destroys
 func TestAccStorageService_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
 	rName := "fusion_storage_service." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-service-display-name")
@@ -50,6 +53,8 @@ func TestAccStorageService_basic(t *testing.T) {
 
 // Updates display name
 func TestAccStorageService_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
 	rName := "fusion_storage_service." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-service-display-name")
@@ -89,6 +94,8 @@ func TestAccStorageService_update(t *testing.T) {
 }
 
 func TestAccStorageService_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
 	rName := "fusion_storage_service." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-service-display-name")
@@ -124,6 +131,8 @@ func TestAccStorageService_attributes(t *testing.T) {
 }
 
 func TestAccStorageService_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
 	rName := "fusion_storage_service." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("storage-service-display-name")
@@ -161,6 +170,53 @@ func TestAccStorageService_multiple(t *testing.T) {
 	})
 }
 
+// Creates and destroys
+func TestAccStorageService_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("storage_service_test")
+	rName := "fusion_storage_service." + rNameConfig
+	displayName := acctest.RandomWithPrefix("storage-service-display-name")
+	storageServiceName := acctest.RandomWithPrefix("test_ss")
+	hardwareTypes := []string{"flash-array-x-optane", "flash-array-x"}
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckStorageServiceDestroy,
+		Steps: []resource.TestStep{
+			// Create Storage Service and validate it's fields
+			{
+				Config: testStorageServiceConfig(rNameConfig, storageServiceName, displayName, hardwareTypes),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", storageServiceName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					testCheckStorageServiceHardwareTypes(rName, hardwareTypes),
+					testStorageServiceExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_storage_service.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/storage-services/%[1]s", storageServiceName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_service.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/storage-services/wrong-%[1]s", storageServiceName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_service.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/%[1]s", storageServiceName),
+				ExpectError:   regexp.MustCompile("invalid storage_service import path. Expected path in format '/storage-services/<storage-service>'"),
+			},
+		},
+	})
+}
+
 func testStorageServiceExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfStorageService, ok := s.RootModule().Resources[rName]
@@ -172,9 +228,9 @@ func testStorageServiceExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfStorageService.Primary.Attributes
 
-		goclientStorageService, _, err := testAccProvider.Meta().(*hmrest.APIClient).StorageServicesApi.GetStorageService(context.Background(), attrs["name"], nil)
+		goclientStorageService, _, err := testAccProvider.Meta().(*hmrest.APIClient).StorageServicesApi.GetStorageServiceById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 
 		if strings.Compare(goclientStorageService.Name, attrs["name"]) != 0 ||

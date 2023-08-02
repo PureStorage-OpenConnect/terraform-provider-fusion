@@ -29,15 +29,17 @@ func dataSourceStorageClass() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaStorageClass(),
 			},
+			Description: "List of matching Storage Classes.",
 		},
 		optionStorageService: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The containing Storage Service.",
 		},
 	}
 
-	storageClassDataSourceFunctions := NewBaseDataSourceFunctions("StorageClass", ds, dsSchema)
+	storageClassDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindStorageClass, ds, dsSchema)
 
 	return storageClassDataSourceFunctions.Resource
 }

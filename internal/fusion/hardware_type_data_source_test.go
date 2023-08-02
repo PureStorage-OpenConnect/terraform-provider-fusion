@@ -15,6 +15,8 @@ import (
 )
 
 func TestAccHardwareTypeDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("hw_ds_test")
 
 	expectedHWTypes := []map[string]interface{}{
@@ -64,6 +66,8 @@ func TestAccHardwareTypeDataSource_basic(t *testing.T) {
 }
 
 func TestAccHardwareTypeDataSource_filter(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("hw_ds_test")
 
 	tlcHWTypes := []map[string]interface{}{

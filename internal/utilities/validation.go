@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -43,7 +44,7 @@ func DataUnitsBeetween(min, max int64, factor int) schema.SchemaValidateDiagFunc
 				diag.Diagnostic{
 					Severity: diag.Error,
 					Summary:  "invalid value type",
-					Detail:   fmt.Sprintf("%s expected to be string", value),
+					Detail:   fmt.Sprintf("%v expected to be string", value),
 				},
 			}
 		}
@@ -73,6 +74,31 @@ func DataUnitsBeetween(min, max int64, factor int) schema.SchemaValidateDiagFunc
 	}
 }
 
+func StringIsInt64(value any, p cty.Path) diag.Diagnostics {
+	valueString, ok := value.(string)
+	if !ok {
+		return diag.Diagnostics{
+			diag.Diagnostic{
+				Severity: diag.Error,
+				Summary:  "invalid value type",
+				Detail:   fmt.Sprintf("%v expected to be string", value),
+			},
+		}
+	}
+
+	if _, err := strconv.ParseInt(valueString, 10, 64); err != nil {
+		return diag.Diagnostics{
+			diag.Diagnostic{
+				Severity: diag.Error,
+				Summary:  errInvalidDataUnitFormat.Error(),
+				Detail:   fmt.Sprintf("%s unexpected data unit format", valueString),
+			},
+		}
+	}
+
+	return diag.Diagnostics{}
+}
+
 func AllowedDataUnitSuffix(suffixes ...byte) schema.SchemaValidateDiagFunc {
 	if !isAlphaStringRegex.Match(suffixes) {
 		panic("AllowedDataUnitSuffix accepts only letters")
@@ -86,7 +112,7 @@ func AllowedDataUnitSuffix(suffixes ...byte) schema.SchemaValidateDiagFunc {
 				diag.Diagnostic{
 					Severity: diag.Error,
 					Summary:  "invalid type",
-					Detail:   fmt.Sprintf("%s expected to be string", value),
+					Detail:   fmt.Sprintf("%v expected to be string", value),
 				},
 			}
 		}

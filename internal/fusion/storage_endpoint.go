@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -27,55 +28,99 @@ func schemaStorageEndpoint() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the storage endpoint.",
+			Description:  "The name of the Storage Endpoint.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The human name of the storage endpoint. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Storage Endpoint. If not provided, defaults to I(name).",
 		},
 		optionRegion: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the region the availability zone is in.",
+			Description:  "The name of the Region the Availability Zone is in.",
 		},
 		optionAvailabilityZone: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the availability zone for the storage endpoint.",
+			Description:  "The name of the Availability Zone for the Storage Endpoint.",
 		},
 		optionIscsi: {
-			Type:        schema.TypeSet,
-			Required:    true,
-			Description: "List of discovery interfaces.",
+			Type:         schema.TypeList,
+			Optional:     true,
+			Description:  "iSCSI options.",
+			ExactlyOneOf: []string{optionIscsi, optionCbsAzureIscsi},
+			MaxItems:     1,
 			Elem: &schema.Resource{
 				Schema: map[string]*schema.Schema{
-					optionAddress: {
-						Type:             schema.TypeString,
-						Required:         true,
-						ValidateDiagFunc: IsValidPrefix,
-						Description: "IP address to be used in the subnet of the storage endpoint." +
-							" IP address must include a CIDR notation." +
-							" Only IPv4 is supported at the moment.",
-					},
-					optionGateway: {
-						Type:             schema.TypeString,
-						Optional:         true,
-						ValidateDiagFunc: IsValidAddress,
-						Description:      "Address of the subnet gateway.",
-					},
-					optionNetworkInterfaceGroups: {
+					optionDiscoveryInterfaces: {
 						Type:        schema.TypeSet,
-						Optional:    true,
-						Description: "List of network interface groups to assign to the address.",
+						Required:    true,
+						Description: "List of discovery interfaces.",
+						Elem: &schema.Resource{
+							Schema: map[string]*schema.Schema{
+								optionAddress: {
+									Type:             schema.TypeString,
+									Required:         true,
+									ValidateDiagFunc: IsValidCidr,
+									Description: "The IPv4 CIDR address to be used in the subnet of the Storage Endpoint." +
+										" Only IPv4 is supported at the moment.",
+								},
+								optionGateway: {
+									Type:             schema.TypeString,
+									Optional:         true,
+									ValidateDiagFunc: IsValidAddress,
+									Description:      "The IPv4 address of the subnet gateway.",
+								},
+								optionNetworkInterfaceGroups: {
+									Type:        schema.TypeSet,
+									Optional:    true,
+									Description: "The list of Network Interface Groups to assign to the address.",
+									Elem: &schema.Schema{
+										Type:         schema.TypeString,
+										ValidateFunc: validation.StringIsNotEmpty,
+										Description:  "The name of the Network Interface Group.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		optionCbsAzureIscsi: {
+			Type:         schema.TypeList,
+			Optional:     true,
+			Description:  "CBS Azure iSCSI.",
+			ExactlyOneOf: []string{optionIscsi, optionCbsAzureIscsi},
+			MaxItems:     1,
+			Elem: &schema.Resource{
+				Schema: map[string]*schema.Schema{
+					optionStorageEndpointCollectionIdentity: {
+						Type:         schema.TypeString,
+						Required:     true,
+						ValidateFunc: validation.StringIsNotEmpty,
+						Description:  "The Storage Endpoint Collection Identity which belongs to the Azure entities.",
+					},
+					optionLoadBalancer: {
+						Type:         schema.TypeString,
+						Required:     true,
+						ValidateFunc: validation.StringIsNotEmpty,
+						Description:  "The Load Balancer id which gives permissions to CBS array appliations to modify the Load Balancer.",
+					},
+					optionLoadBalancerAddresses: {
+						Type:        schema.TypeList,
+						Required:    true,
+						Description: "The list of the Load Balancer addresses.",
+						MinItems:    cbsAzureIscsiLoadBalancerAddressesAmount,
+						MaxItems:    cbsAzureIscsiLoadBalancerAddressesAmount,
 						Elem: &schema.Schema{
-							Type:         schema.TypeString,
-							ValidateFunc: validation.StringIsNotEmpty,
-							Description:  "The name of the network interface group.",
+							Type:             schema.TypeString,
+							ValidateDiagFunc: IsValidAddress,
 						},
 					},
 				},
@@ -86,8 +131,9 @@ func schemaStorageEndpoint() map[string]*schema.Schema {
 
 // This is our entry point for the Storage Endpoint resource.
 func resourceStorageEndpoint() *schema.Resource {
-	p := &storageEndpointProvider{BaseResourceProvider{ResourceKind: "StorageEndpoint"}}
-	storageEndpointResourceFunctions := NewBaseResourceFunctions("StorageEndpoint", p)
+	p := &storageEndpointProvider{BaseResourceProvider{ResourceKind: resourceKindStorageEndpoint}}
+	storageEndpointResourceFunctions := NewBaseResourceFunctions(resourceKindStorageEndpoint, p)
+	storageEndpointResourceFunctions.Resource.Description = "A Storage Endpoint provides access to storage in an Availability Zone."
 	storageEndpointResourceFunctions.Resource.Schema = schemaStorageEndpoint()
 
 	return storageEndpointResourceFunctions.Resource
@@ -99,43 +145,18 @@ func (p *storageEndpointProvider) PrepareCreate(ctx context.Context, d *schema.R
 	region := rdString(ctx, d, optionRegion)
 	availabilityZone := rdString(ctx, d, optionAvailabilityZone)
 
-	iscsiSet := d.Get(optionIscsi).(*schema.Set)
-	discoveryInterfaces := make([]hmrest.StorageEndpointIscsiDiscoveryInterfacePost, iscsiSet.Len())
-
-	for i, iscsi := range iscsiSet.List() {
-		iscsiMap := iscsi.(map[string]interface{})
-		nigSet := iscsiMap[optionNetworkInterfaceGroups].(*schema.Set)
-		niGroups := make([]string, nigSet.Len())
-
-		for i, group := range nigSet.List() {
-			niGroups[i] = group.(string)
-		}
-
-		discoveryInterfacePost := hmrest.StorageEndpointIscsiDiscoveryInterfacePost{
-			Address: iscsiMap[optionAddress].(string),
-		}
-
-		if len(niGroups) != 0 {
-			discoveryInterfacePost.NetworkInterfaceGroups = niGroups
-		}
-
-		if iscsiMap[optionGateway] != nil {
-			discoveryInterfacePost.Gateway = iscsiMap[optionGateway].(string)
-		}
-
-		discoveryInterfaces[i] = discoveryInterfacePost
+	body := hmrest.StorageEndpointPost{
+		Name:        name,
+		DisplayName: displayName,
 	}
 
-	// Currently there is only one endpoint type, which is implied by the presence of the iscsi field
-	endpointType := optionIscsi
-
-	body := hmrest.StorageEndpointPost{
-		Name:         name,
-		DisplayName:  displayName,
-		EndpointType: endpointType,
-		Iscsi: &hmrest.StorageEndpointIscsiPost{
-			DiscoveryInterfaces: discoveryInterfaces,
-		},
+	_, isCbsAzureIscsi := d.GetOk(optionCbsAzureIscsi)
+	if isCbsAzureIscsi {
+		body.EndpointType = endpointTypeCbsAzureIscsi
+		body.CbsAzureIscsi = p.makeStorageEndpointCbsAzureIscsiPost(ctx, d)
+	} else {
+		body.EndpointType = endpointTypeIscsi
+		body.Iscsi = p.makeStorageEndpointIscsiPost(d)
 	}
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
@@ -154,30 +175,8 @@ func (p *storageEndpointProvider) ReadResource(ctx context.Context, client *hmre
 		return err
 	}
 
-	iscsiSet := make([]interface{}, 0)
-	for _, discoveryInterface := range se.Iscsi.DiscoveryInterfaces {
-		niGroups := make([]string, 0)
+	return p.loadStorageEndpoint(se, d)
 
-		for _, niGroup := range discoveryInterface.NetworkInterfaceGroups {
-			niGroups = append(niGroups, niGroup.Name)
-		}
-
-		iscsi := map[string]interface{}{
-			optionAddress:                discoveryInterface.Address,
-			optionGateway:                discoveryInterface.Gateway,
-			optionNetworkInterfaceGroups: niGroups,
-		}
-
-		iscsiSet = append(iscsiSet, iscsi)
-	}
-
-	d.Set(optionName, se.Name)
-	d.Set(optionDisplayName, se.DisplayName)
-	d.Set(optionRegion, se.Region.Name)
-	d.Set(optionAvailabilityZone, se.AvailabilityZone.Name)
-	d.Set(optionIscsi, iscsiSet)
-
-	return nil
 }
 
 func (p *storageEndpointProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -221,4 +220,138 @@ func (p *storageEndpointProvider) PrepareUpdate(ctx context.Context, client *hmr
 	}
 
 	return fn, patches, nil
+}
+
+func (p *storageEndpointProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{
+		resourceGroupNameRegion,
+		resourceGroupNameAvailabilityZone,
+		resourceGroupNameStorageEndpoint,
+	}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage_endpoint import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>/storage-endpoints/<storage-endpoint>'")
+	}
+
+	storageEndpoint, _, err := client.StorageEndpointsApi.GetStorageEndpoint(ctx, selfLinkFieldsWithValues[resourceGroupNameRegion], selfLinkFieldsWithValues[resourceGroupNameAvailabilityZone], selfLinkFieldsWithValues[resourceGroupNameStorageEndpoint], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadStorageEndpoint(storageEndpoint, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(storageEndpoint.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *storageEndpointProvider) loadStorageEndpoint(se hmrest.StorageEndpoint, d *schema.ResourceData) error {
+	err := getFirstError(
+		d.Set(optionName, se.Name),
+		d.Set(optionDisplayName, se.DisplayName),
+		d.Set(optionRegion, se.Region.Name),
+		d.Set(optionAvailabilityZone, se.AvailabilityZone.Name),
+		d.Set(optionIscsi, nil),
+		d.Set(optionCbsAzureIscsi, nil),
+	)
+	switch se.EndpointType {
+	case endpointTypeIscsi:
+		err = getFirstError(err, d.Set(optionIscsi, parseStorageEndpointIscsi(se.Iscsi)))
+	case endpointTypeCbsAzureIscsi:
+		err = getFirstError(err, d.Set(optionCbsAzureIscsi, parseStorageEndpointCbsAzureIscsi(se.CbsAzureIscsi)))
+	}
+	return err
+}
+
+func (p *storageEndpointProvider) makeStorageEndpointIscsiPost(d *schema.ResourceData) *hmrest.StorageEndpointIscsiPost {
+	discoveryInterfaceSet := d.Get(p.composeIscsiChildOptionName(optionDiscoveryInterfaces)).(*schema.Set).List()
+	discoveryInterfaces := make([]hmrest.StorageEndpointIscsiDiscoveryInterfacePost, len(discoveryInterfaceSet))
+
+	for i, discoveryInterface := range discoveryInterfaceSet {
+		discoveryInterfaceMap := discoveryInterface.(map[string]interface{})
+		nigSet := discoveryInterfaceMap[optionNetworkInterfaceGroups].(*schema.Set)
+		niGroups := make([]string, nigSet.Len())
+
+		for i, group := range nigSet.List() {
+			niGroups[i] = group.(string)
+		}
+
+		discoveryInterfacePost := hmrest.StorageEndpointIscsiDiscoveryInterfacePost{
+			Address: discoveryInterfaceMap[optionAddress].(string),
+		}
+
+		if len(niGroups) != 0 {
+			discoveryInterfacePost.NetworkInterfaceGroups = niGroups
+		}
+
+		if discoveryInterfaceMap[optionGateway] != nil {
+			discoveryInterfacePost.Gateway = discoveryInterfaceMap[optionGateway].(string)
+		}
+
+		discoveryInterfaces[i] = discoveryInterfacePost
+	}
+
+	return &hmrest.StorageEndpointIscsiPost{
+		DiscoveryInterfaces: discoveryInterfaces,
+	}
+}
+
+func (p *storageEndpointProvider) makeStorageEndpointCbsAzureIscsiPost(ctx context.Context, d *schema.ResourceData) *hmrest.StorageEndpointCbsAzureIscsiPost {
+	rawAddresses := d.Get(p.composeCbsAzureIscsiChildOptionName(optionLoadBalancerAddresses)).([]interface{})
+	addresses := make([]string, 0, len(rawAddresses))
+	for _, addr := range rawAddresses {
+		addresses = append(addresses, addr.(string))
+	}
+
+	return &hmrest.StorageEndpointCbsAzureIscsiPost{
+		StorageEndpointCollectionIdentity: rdString(ctx, d, p.composeCbsAzureIscsiChildOptionName(optionStorageEndpointCollectionIdentity)),
+		LoadBalancer:                      rdString(ctx, d, p.composeCbsAzureIscsiChildOptionName(optionLoadBalancer)),
+		LoadBalancerAddresses:             addresses,
+	}
+}
+
+func (p *storageEndpointProvider) composeCbsAzureIscsiChildOptionName(option string) string {
+	return fmt.Sprintf("%s.0.%s", optionCbsAzureIscsi, option)
+}
+
+func (p *storageEndpointProvider) composeIscsiChildOptionName(option string) string {
+	return fmt.Sprintf("%s.0.%s", optionIscsi, option)
+}
+
+func parseStorageEndpointIscsi(data *hmrest.StorageEndpointIscsi) []map[string]interface{} {
+	discoveryInterfaceSet := make([]interface{}, 0, len(data.DiscoveryInterfaces))
+	for _, di := range data.DiscoveryInterfaces {
+		discoveryInterface := map[string]interface{}{
+			optionAddress: di.Address,
+			optionGateway: di.Gateway,
+		}
+
+		if len(di.NetworkInterfaceGroups) > 0 {
+			niGroups := make([]string, 0, len(di.NetworkInterfaceGroups))
+			for _, nig := range di.NetworkInterfaceGroups {
+				niGroups = append(niGroups, nig.Name)
+			}
+
+			discoveryInterface[optionNetworkInterfaceGroups] = niGroups
+		}
+
+		discoveryInterfaceSet = append(discoveryInterfaceSet, discoveryInterface)
+	}
+
+	return []map[string]interface{}{{
+		optionDiscoveryInterfaces: discoveryInterfaceSet,
+	}}
+}
+
+func parseStorageEndpointCbsAzureIscsi(data *hmrest.StorageEndpointCbsAzureIscsi) []map[string]interface{} {
+	return []map[string]interface{}{{
+		optionStorageEndpointCollectionIdentity: data.StorageEndpointCollectionIdentity,
+		optionLoadBalancer:                      data.LoadBalancer,
+		optionLoadBalancerAddresses:             data.LoadBalancerAddresses,
+	}}
 }

@@ -10,12 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 )
 
 func TestAccStorageEndpointDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	storageEndpointsCount := 5
 
 	regionName := acctest.RandomWithPrefix("region")
@@ -43,7 +46,11 @@ func TestAccStorageEndpointDataSource_basic(t *testing.T) {
 
 		iscsi := []map[string]interface{}{
 			{
-				"address": fmt.Sprintf("10.21.200.%d/%d", i, i+8),
+				"discovery_interfaces": []map[string]interface{}{
+					{
+						"address": fmt.Sprintf("10.21.200.%d/%d", i, i+8),
+					},
+				},
 			},
 		}
 
@@ -96,7 +103,7 @@ func TestAccStorageEndpointDataSource_basic(t *testing.T) {
 func getStorageEndpointDataSourcesCheckFunc(dsStorageEndpointNames []string, storageEndpoints []map[string]interface{}) resource.TestCheckFunc {
 	checkFuncs := make([]resource.TestCheckFunc, len(dsStorageEndpointNames))
 	for i, se := range storageEndpoints {
-		checkFuncs[i] = utilities.TestCheckDataSource("fusion_storage_endpoint", dsStorageEndpointNames[i], "items", []map[string]interface{}{se})
+		checkFuncs[i] = utilities.TestCheckDataSourceExact("fusion_storage_endpoint", dsStorageEndpointNames[i], "items", []map[string]interface{}{se})
 	}
 	return resource.ComposeTestCheckFunc(checkFuncs...)
 }

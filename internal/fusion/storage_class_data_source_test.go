@@ -18,11 +18,14 @@ import (
 
 // Contains correct list of StorageClasses
 func TestAccStorageClassDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("storage_class_ds_test")
 	storageClassesCount := 3
 	storageClasses := make([]map[string]interface{}, storageClassesCount)
 	storageClassConfigs := make([]string, storageClassesCount)
-	storageService := testAccStorageService
+	storageService := acctest.RandomWithPrefix("storage_sevice_test")
+	storageServiceConfig := testStorageServiceConfigNoDisplayName(storageService, storageService, []string{"flash-array-x"})
 
 	for i := 0; i < storageClassesCount; i++ {
 		storageClassResourceNameConfig := acctest.RandomWithPrefix("storage_class_test")
@@ -45,8 +48,8 @@ func TestAccStorageClassDataSource_basic(t *testing.T) {
 			storageClassDisplayName, storageService, storageClassSize, storageClassIops, storageClassBandwidth)
 	}
 
-	allConfigs := strings.Join(storageClassConfigs, "\n")
-	partialConfig := storageClassConfigs[0] + storageClassConfigs[1]
+	allConfigs := storageServiceConfig + strings.Join(storageClassConfigs, "\n")
+	partialConfig := storageServiceConfig + storageClassConfigs[0] + storageClassConfigs[1]
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -62,11 +65,19 @@ func TestAccStorageClassDataSource_basic(t *testing.T) {
 				Config: allConfigs + "\n" + testStorageClassDataSourceConfig(dsNameConfig, storageService),
 				Check:  utilities.TestCheckDataSource("fusion_storage_class", dsNameConfig, "items", storageClasses),
 			},
+			{
+				Config: partialConfig,
+			},
 			// Remove one StorageClass. Check if only two of them are contained in the data source
 			{
 				Config: partialConfig + "\n" + testStorageClassDataSourceConfig(dsNameConfig, storageService),
-				Check: utilities.TestCheckDataSource(
-					"fusion_storage_class", dsNameConfig, "items", []map[string]interface{}{storageClasses[0], storageClasses[1]},
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSource(
+						"fusion_storage_class", dsNameConfig, "items", []map[string]interface{}{storageClasses[0], storageClasses[1]},
+					),
+					utilities.TestCheckDataSourceNotHave(
+						"fusion_storage_class", dsNameConfig, "items", []map[string]interface{}{storageClasses[2]},
+					),
 				),
 			},
 		},

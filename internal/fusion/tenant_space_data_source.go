@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
@@ -23,8 +24,10 @@ func dataSourceTenantSpace() *schema.Resource {
 
 	dsSchema := map[string]*schema.Schema{
 		optionTenant: {
-			Type:     schema.TypeString,
-			Required: true,
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Tenant.",
 		},
 		optionItems: {
 			Type:     schema.TypeList,
@@ -32,10 +35,11 @@ func dataSourceTenantSpace() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaTenantSpace(),
 			},
+			Description: "List of matching Tenant Spaces.",
 		},
 	}
 
-	tenantSpaceDataSourceFunctions := NewBaseDataSourceFunctions("TenantSpace", ds, dsSchema)
+	tenantSpaceDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindTenantSpace, ds, dsSchema)
 
 	return tenantSpaceDataSourceFunctions.Resource
 }
@@ -46,7 +50,7 @@ func (ds *tenantSpaceDataSource) ReadDataSource(ctx context.Context, client *hmr
 		return err
 	}
 
-	tenantSpacesList := make([]map[string]interface{}, resp.Count)
+	tenantSpacesList := make([]map[string]interface{}, 0, resp.Count)
 
 	for _, ts := range resp.Items {
 		tenantSpacesList = append(tenantSpacesList, map[string]interface{}{

@@ -7,12 +7,19 @@ package utilities
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
+
+func CheckTestSkip(t *testing.T) {
+	if os.Getenv(resource.TestEnvVar) != "1" {
+		t.SkipNow()
+	}
+}
 
 func TestCheckDataSource(
 	dataSourceType, dataSourceName, listFieldName string, items []map[string]interface{},
@@ -42,6 +49,9 @@ func testCheckDataSourceGeneric(
 ) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		dataSource := s.RootModule().Resources[fmt.Sprintf("data.%s.%s", dataSourceType, dataSourceName)]
+		if dataSource == nil {
+			return fmt.Errorf("data source is not presented")
+		}
 
 		actualSize, err := strconv.Atoi(dataSource.Primary.Attributes[listFieldName+".#"])
 		if err != nil {
@@ -87,6 +97,63 @@ func testCheckDataSourceGeneric(
 
 			if !found {
 				return fmt.Errorf("cannot find resource with name %s in %s data source", expectedName, dataSourceName)
+			}
+		}
+
+		return nil
+	}
+}
+
+func TestCheckDataSourceNotHave(
+	dataSourceType, dataSourceName, listFieldName string, items []map[string]interface{},
+) resource.TestCheckFunc {
+	return testCheckDataSourceNotHaveGeneric(dataSourceType, dataSourceName, listFieldName, items)
+}
+
+func testCheckDataSourceNotHaveGeneric(dataSourceType, dataSourceName, listFieldName string, items []map[string]interface{}) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		dataSource := s.RootModule().Resources[fmt.Sprintf("data.%s.%s", dataSourceType, dataSourceName)]
+		if dataSource == nil {
+			return fmt.Errorf("data source is not presented")
+		}
+
+		actualSize, err := strconv.Atoi(dataSource.Primary.Attributes[listFieldName+".#"])
+		if err != nil {
+			return err
+		}
+
+		// Iterate over excluded items and try to find them in the data source list
+		for _, item := range items {
+			excludedName := item["name"].(string)
+
+			for i := 0; i < actualSize; i++ {
+				actualName := dataSource.Primary.Attributes[fmt.Sprintf("%s.%d.name", listFieldName, i)]
+
+				if actualName != excludedName {
+					continue
+				}
+
+				found := true
+
+				for key, value := range item {
+					actualValue := dataSource.Primary.Attributes[fmt.Sprintf("%s.%d.%s", listFieldName, i, key)]
+					if boolValue, ok := value.(bool); ok {
+						value = strconv.FormatBool(boolValue) // convert bool to string to match Terraform representation (Terraform stores all attributes as string)
+					}
+
+					if _, ok := value.(string); len(actualValue) == 0 && !ok {
+						continue // Skip if the actualValue is not a scalar (thus is empty)
+					}
+
+					if actualValue != value {
+						found = false
+						break
+					}
+				}
+
+				if found {
+					return fmt.Errorf("found resource with name %s in %s data source which must not be presented", excludedName, dataSourceName)
+				}
 			}
 		}
 

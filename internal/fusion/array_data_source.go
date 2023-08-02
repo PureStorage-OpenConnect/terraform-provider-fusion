@@ -17,7 +17,7 @@ import (
 type arrayDataSource struct{}
 
 func dataSourceArray() *schema.Resource {
-	ArrayDataSourceFunctions := NewBaseDataSourceFunctions("Array", &arrayDataSource{},
+	array := NewBaseDataSourceFunctions(resourceKindArray, &arrayDataSource{},
 		map[string]*schema.Schema{
 			optionItems: {
 				Type:     schema.TypeList,
@@ -25,20 +25,22 @@ func dataSourceArray() *schema.Resource {
 				Elem: &schema.Resource{
 					Schema: createArraySchema(),
 				},
+				Description: "List of matching Arrays.",
 			},
 			optionAvailabilityZone: {
 				Type:         schema.TypeString,
 				Required:     true,
 				ValidateFunc: validation.StringIsNotEmpty,
+				Description:  "The name of Availability Zone within which the Array is created.",
 			},
 			optionRegion: {
 				Type:         schema.TypeString,
 				Required:     true,
 				ValidateFunc: validation.StringIsNotEmpty,
+				Description:  "The name of Region within which the Array is created.",
 			},
 		})
-
-	return ArrayDataSourceFunctions.Resource
+	return array.Resource
 }
 
 func (ds *arrayDataSource) ReadDataSource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) error {

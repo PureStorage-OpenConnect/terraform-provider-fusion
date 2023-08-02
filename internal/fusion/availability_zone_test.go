@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -22,6 +23,8 @@ import (
 
 // Creates and destroys
 func TestAccAvailabilityZone_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("az_test")
 	rName := "fusion_availability_zone." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("az-display-name")
@@ -50,6 +53,8 @@ func TestAccAvailabilityZone_basic(t *testing.T) {
 }
 
 func TestAccAvailabilityZone_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("az_test")
 	rName := "fusion_availability_zone." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("az-display-name")
@@ -78,15 +83,13 @@ func TestAccAvailabilityZone_update(t *testing.T) {
 				Config:      commonConfig + testAvailabilityZoneConfig(rNameConfig, "immutable", displayName1, region),
 				ExpectError: regexp.MustCompile("unsupported operation: update"),
 			},
-			// TODO: Remove this step once the HM-5438 bug is resolved
-			{
-				Config: commonConfig + testAvailabilityZoneConfig(rNameConfig, azName, displayName1, region),
-			},
 		},
 	})
 }
 
 func TestAccAvailabilityZone_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("az_test")
 	rName := "fusion_availability_zone." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("az-display-name")
@@ -127,6 +130,54 @@ func TestAccAvailabilityZone_multiple(t *testing.T) {
 	})
 }
 
+func TestAccAvailabilityZone_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("az_test")
+	rName := "fusion_availability_zone." + rNameConfig
+	displayName1 := acctest.RandomWithPrefix("az-display-name")
+	azName := acctest.RandomWithPrefix("az-test")
+	region := acctest.RandomWithPrefix("az_test_region")
+
+	commonConfig := testRegionConfig(region, region, region)
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckAvailabilityZoneDestroy,
+		Steps: []resource.TestStep{
+			// Create Availability Zone and validate it's fields
+			{
+				Config: commonConfig + testAvailabilityZoneConfig(rNameConfig, azName, displayName1, region),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", azName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName1),
+					resource.TestCheckResourceAttr(rName, "region", region),
+					testAvailabilityZoneExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_availability_zone.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/regions/%[1]s/availability-zones/%[2]s", region, azName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_availability_zone.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/regions/%[1]s/availability-zones/wrong-%[2]s", region, azName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_availability_zone.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/availability-zones/%[1]s", azName),
+				ExpectError:   regexp.MustCompile("invalid availability_zone import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>'"),
+			},
+		},
+	})
+}
+
 func testAvailabilityZoneExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfAvailabilityZone, ok := s.RootModule().Resources[rName]
@@ -140,7 +191,7 @@ func testAvailabilityZoneExists(rName string) resource.TestCheckFunc {
 
 		goclientAvailabilityZone, _, err := testAccProvider.Meta().(*hmrest.APIClient).AvailabilityZonesApi.GetAvailabilityZoneById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientAvailabilityZone.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientAvailabilityZone.DisplayName, attrs["display_name"]) != 0 ||
@@ -159,9 +210,12 @@ func testCheckAvailabilityZoneDestroy(s *terraform.State) error {
 			continue
 		}
 		attrs := rs.Primary.Attributes
+		azName, ok := attrs["name"]
+		if !ok {
+			continue // Skip data sources
+		}
 
 		regionName := attrs["region"]
-		azName := attrs["name"]
 
 		_, resp, err := client.AvailabilityZonesApi.GetAvailabilityZone(context.Background(), regionName, azName, nil)
 		if err != nil && resp.StatusCode == http.StatusNotFound {

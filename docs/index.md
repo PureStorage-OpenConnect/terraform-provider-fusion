@@ -13,7 +13,7 @@ PLACEHOLDER body...
 
 ```terraform
 provider "fusion" {
-    host             = var.hm_url
+    api_host         = var.hm_url
     issuer_id        = var.issuer_id
     private_key_file = var.private_key
 }
@@ -21,7 +21,7 @@ provider "fusion" {
 resource "fusion_tenant_space" "fts" {
   name         = var.tenant_space_name
   display_name = var.tenant_space_display_name
-  tenant_name  = var.tenant_name
+  tenant       = var.tenant_name
 }
 
 resource "fusion_host_access_policy" "host_access_policy" {
@@ -34,11 +34,11 @@ resource "fusion_host_access_policy" "host_access_policy" {
 resource "fusion_placement_group" "placement_group" {
   name                   = "pg-name"
   display_name           = "pg-display-name"
-  tenant_name            = var.tenant_name
-  tenant_space_name      = fusion_tenant_space.fts.name
-  region_name            = var.region_name
-  availability_zone_name = var.availability_zone
-  storage_service_name   = var.storage_service
+  tenant                 = var.tenant_name
+  tenant_space           = fusion_tenant_space.fts.name
+  region                 = var.region_name
+  availability_zone      = var.availability_zone
+  storage_service        = var.storage_service
 }
 ```
 
@@ -47,6 +47,12 @@ resource "fusion_placement_group" "placement_group" {
 
 ### Optional
 
-- `host` (String)
-- `issuer_id` (String)
-- `private_key_file` (String)
+- `access_token` (String, Sensitive) The Access Token for the Fusion API.
+- `api_host` (String) The URL of Fusion API host.
+- `fusion_config` (String) The Path to the Fusion Config File containing authentication profiles.
+- `fusion_config_profile` (String) The name of the profile in the Fusion configuration file to use.
+- `issuer_id` (String) The Issuer ID, used together with private key to authenticate the client.
+- `private_key` (String, Sensitive) Raw string with Private Key to be used for the authentication. Accepts PKCS#1 format. Include the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
+- `private_key_file` (String) The Path to the Private Key File to be used for the authentication.
+- `private_key_password` (String, Sensitive) The password of encrypted RSA private key.
+- `token_endpoint` (String) The URL of the Fusion authentication token endpoint.

@@ -18,6 +18,8 @@ import (
 
 // Contains correct list of Tenants
 func TestAccTenantDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("tenant_ds_test")
 	count := 3
 	tenants := make([]map[string]interface{}, count)
@@ -53,11 +55,19 @@ func TestAccTenantDataSource_basic(t *testing.T) {
 				Config: allConfigs + "\n" + testTenantDataSourceConfig(dsNameConfig),
 				Check:  utilities.TestCheckDataSource("fusion_tenant", dsNameConfig, "items", tenants),
 			},
+			{
+				Config: partialConfig,
+			},
 			// Remove one tenant. Check if only two of them are contained in the data source
 			{
 				Config: partialConfig + "\n" + testTenantDataSourceConfig(dsNameConfig),
-				Check: utilities.TestCheckDataSource(
-					"fusion_tenant", dsNameConfig, "items", []map[string]interface{}{tenants[0], tenants[1]},
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSource(
+						"fusion_tenant", dsNameConfig, "items", []map[string]interface{}{tenants[0], tenants[1]},
+					),
+					utilities.TestCheckDataSourceNotHave(
+						"fusion_tenant", dsNameConfig, "items", []map[string]interface{}{tenants[2]},
+					),
 				),
 			},
 		},

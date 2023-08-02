@@ -29,10 +29,11 @@ func dataSourceTenant() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaTenant(),
 			},
+			Description: "List of matching Tenants.",
 		},
 	}
 
-	tenantDataSourceFunctions := NewBaseDataSourceFunctions("Tenant", ds, dsSchema)
+	tenantDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindTenant, ds, dsSchema)
 	return tenantDataSourceFunctions.Resource
 }
 

@@ -19,6 +19,8 @@ import (
 
 // Contains correct list of Network Interface Groups
 func TestAccNetworkInterfaceGroupDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("network_interface_group_ds_test")
 	count := 3
 	nigs := make([]map[string]interface{}, count)
@@ -33,8 +35,8 @@ func TestAccNetworkInterfaceGroupDataSource_basic(t *testing.T) {
 		nigs[i] = map[string]interface{}{
 			"name":              nigName,
 			"display_name":      displayName,
-			"availability_zone": availabilityZone,
-			"region":            region,
+			"availability_zone": preexistingAvailabilityZone,
+			"region":            preexistingRegion,
 			"group_type":        groupType,
 			"eth": []map[string]interface{}{{
 				"gateway": gateway,
@@ -43,7 +45,7 @@ func TestAccNetworkInterfaceGroupDataSource_basic(t *testing.T) {
 			}},
 		}
 
-		configs[i] = testNetworkInterfaceGroupConfig(configName, nigName, displayName, availabilityZone, region, groupType, gateway, prefix, mtu)
+		configs[i] = testNetworkInterfaceGroupConfig(configName, nigName, displayName, preexistingAvailabilityZone, preexistingRegion, groupType, gateway, prefix, mtu)
 	}
 
 	allConfigs := strings.Join(configs, "\n")
@@ -60,14 +62,22 @@ func TestAccNetworkInterfaceGroupDataSource_basic(t *testing.T) {
 			},
 			// Check if they are contained in the data source
 			{
-				Config: allConfigs + "\n" + testNetworkInterfaceGroupDataSourceConfig(dsNameConfig, availabilityZone, region),
+				Config: allConfigs + "\n" + testNetworkInterfaceGroupDataSourceConfig(dsNameConfig, preexistingAvailabilityZone, preexistingRegion),
 				Check:  utilities.TestCheckDataSource("fusion_network_interface_group", dsNameConfig, "items", nigs),
+			},
+			{
+				Config: partialConfig,
 			},
 			// Remove one nig. Check if only two of them are contained in the data source
 			{
-				Config: partialConfig + "\n" + testNetworkInterfaceGroupDataSourceConfig(dsNameConfig, availabilityZone, region),
-				Check: utilities.TestCheckDataSource(
-					"fusion_network_interface_group", dsNameConfig, "items", []map[string]interface{}{nigs[0], nigs[1]},
+				Config: partialConfig + "\n" + testNetworkInterfaceGroupDataSourceConfig(dsNameConfig, preexistingAvailabilityZone, preexistingRegion),
+				Check: resource.ComposeTestCheckFunc(
+					utilities.TestCheckDataSource(
+						"fusion_network_interface_group", dsNameConfig, "items", []map[string]interface{}{nigs[0], nigs[1]},
+					),
+					utilities.TestCheckDataSourceNotHave(
+						"fusion_network_interface_group", dsNameConfig, "items", []map[string]interface{}{nigs[2]},
+					),
 				),
 			},
 		},

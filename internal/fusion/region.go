@@ -9,6 +9,7 @@ import (
 	context "context"
 	"fmt"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -22,27 +23,29 @@ type regionProvider struct {
 
 func schemaRegion() map[string]*schema.Schema {
 	return map[string]*schema.Schema{
-		"name": {
+		optionName: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
 			Description:  "The name of the Region.",
 		},
-		"display_name": {
+		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The human name of the Region. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Region. If not provided, defaults to I(name).",
 		},
 	}
 }
 
 // This is our entry point for the Region resource
 func resourceRegion() *schema.Resource {
-	vp := &regionProvider{BaseResourceProvider{ResourceKind: "Region"}}
-	regionResourceFunctions := NewBaseResourceFunctions("Region", vp)
+	vp := &regionProvider{BaseResourceProvider{ResourceKind: resourceKindRegion}}
+	regionResourceFunctions := NewBaseResourceFunctions(resourceKindRegion, vp)
 
+	regionResourceFunctions.Resource.Description = "A Region is a collection of Availability Zones. " +
+		"It is owned by AZ Admins. Active Cluster / Sync Rep is possible between AZs in the same Region."
 	regionResourceFunctions.Resource.Schema = schemaRegion()
 
 	return regionResourceFunctions.Resource
@@ -70,9 +73,7 @@ func (vp *regionProvider) ReadResource(ctx context.Context, client *hmrest.APICl
 		return err
 	}
 
-	d.Set("name", region.Name)
-	d.Set("display_name", region.DisplayName)
-	return nil
+	return vp.loadRegion(region, d)
 }
 
 func (vp *regionProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -106,4 +107,35 @@ func (vp *regionProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 	}
 
 	return fn, patches, nil
+}
+
+func (vp *regionProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{resourceGroupNameRegion}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid region import path. Expected path in format '/regions/<region>'")
+	}
+
+	region, _, err := client.RegionsApi.GetRegion(ctx, selfLinkFieldsWithValues[resourceGroupNameRegion], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = vp.loadRegion(region, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(region.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (vp *regionProvider) loadRegion(region hmrest.Region, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, region.Name),
+		d.Set(optionDisplayName, region.DisplayName),
+	)
 }

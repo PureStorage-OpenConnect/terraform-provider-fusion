@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"regexp"
 	"sort"
@@ -12,27 +11,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 )
 
 func TestAccVolume_basic(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Dont run with units tests because it will try to create the context")
-	}
+	utilities.CheckTestSkip(t)
 
-	ctx := setupTestCtx(t)
-
-	// Setup resources we need
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
-	utilities.TraceError(ctx, err)
-
-	ts := testFusionResource{RName: "ts", Name: acctest.RandomWithPrefix("ts-volTest")}
-	pg0 := testFusionResource{RName: "pg0", Name: acctest.RandomWithPrefix("pg0-volTest")}
-	pg1 := testFusionResource{RName: "pg1", Name: acctest.RandomWithPrefix("pg1-volTest")}
+	tenant := acctest.RandomWithPrefix("tenant-volTest")
+	ts := acctest.RandomWithPrefix("ts-volTest")
+	pg0 := acctest.RandomWithPrefix("pg0-volTest")
+	pg1 := acctest.RandomWithPrefix("pg1-volTest")
 	host0 := testFusionResource{RName: "host0", Name: acctest.RandomWithPrefix("host0-volTest")}
 	host1 := testFusionResource{RName: "host1", Name: acctest.RandomWithPrefix("host1-volTest")}
 	host2 := testFusionResource{RName: "host2", Name: acctest.RandomWithPrefix("host2-volTest")}
@@ -50,11 +43,13 @@ func TestAccVolume_basic(t *testing.T) {
 		RName:                "test_volume",
 		Name:                 acctest.RandomWithPrefix("test_vol"),
 		DisplayName:          "initial display name",
+		Tenant:               tenant,
 		TenantSpace:          ts,
 		ProtectionPolicyName: protectionPolicy0Name,
 		StorageClassName:     storageClass0Name,
 		PlacementGroup:       pg0,
 		Size:                 1 << 20,
+		Hosts:                []testFusionResource{host0},
 		Eradicate:            &eradicate,
 	}
 
@@ -64,7 +59,7 @@ func TestAccVolume_basic(t *testing.T) {
 	volState1.PlacementGroup = pg1
 	volState1.StorageClassName = storageClass1Name
 	volState1.Size += 1 << 20
-	volState1.Hosts = []testFusionResource{host0}
+	volState1.Hosts = []testFusionResource{}
 
 	// Remove and add hosts at the same time, also change protection policy
 	volState2 := volState1
@@ -79,13 +74,19 @@ func TestAccVolume_basic(t *testing.T) {
 	volState3.StorageClassName = storageClass0Name
 
 	commonConfig := "" +
-		testTenantSpaceConfigWithNames(ts.RName, "ts display name", ts.Name, testAccTenant) +
-		testPGConfig("", pg0.RName, pg0.Name, "pg display name", region_name, availability_zone_name, storageService0Name, true) +
-		testPGConfig("", pg1.RName, pg1.Name, "pg display name", region_name, availability_zone_name, storageService1Name, true) +
+		testTenantConfig(tenant, tenant, "tenant display name") +
+		testTenantSpaceConfigWithRefs(ts, "ts display name", ts, tenant) +
+		testPlacementGroupConfigWithRefsNoArray(pg0, pg0, "pg display name", tenant, ts, preexistingRegion, preexistingAvailabilityZone, storageService0Name, true) +
+		testPlacementGroupConfigWithRefsNoArray(pg1, pg1, "pg display name", tenant, ts, preexistingRegion, preexistingAvailabilityZone, storageService1Name, true) +
 		testHostAccessPolicyConfig(host0.RName, host0.Name, "host display name", randIQN(), "linux") +
 		testHostAccessPolicyConfig(host1.RName, host1.Name, "host display name", randIQN(), "linux") +
 		testHostAccessPolicyConfig(host2.RName, host2.Name, "host display name", randIQN(), "linux") +
-		""
+		testStorageServiceConfigNoDisplayName(storageService0Name, storageService0Name, []string{"flash-array-x"}) +
+		testStorageClassConfigNoDisplayName(storageClass0Name, storageClass0Name, storageService0Name, 2*testSizeLimit, testIopsLimit, testBandwidthLimit) +
+		testAccProtectionPolicyConfig(protectionPolicy0Name, protectionPolicy0Name, protectionPolicy0Name, localRPO, localRetention, true) +
+		testStorageServiceConfigNoDisplayName(storageService1Name, storageService1Name, []string{"flash-array-c"}) +
+		testStorageClassConfigNoDisplayName(storageClass1Name, storageClass1Name, storageService1Name, 2*testSizeLimit, testIopsLimit, testBandwidthLimit) +
+		testAccProtectionPolicyConfig(protectionPolicy1Name, protectionPolicy1Name, protectionPolicy1Name, localRPO, localRetention, true)
 
 	testVolumeStep := func(vol testVolume) resource.TestStep {
 		step := resource.TestStep{}
@@ -98,7 +99,7 @@ func TestAccVolume_basic(t *testing.T) {
 
 		for _, host := range vol.Hosts {
 			step.Check = resource.ComposeTestCheckFunc(step.Check,
-				resource.TestCheckTypeSetElemAttr(r, "host_names.*", host.Name),
+				resource.TestCheckTypeSetElemAttr(r, "host_access_policies.*", host.Name),
 			)
 		}
 
@@ -110,16 +111,8 @@ func TestAccVolume_basic(t *testing.T) {
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			// Create extra resources
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicy0Name, storageService0Name, storageClass0Name, "flash-array-x")
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicy1Name, storageService1Name, storageClass1Name, "flash-array-c")
 		},
-		CheckDestroy: func(s *terraform.State) error {
-			// Clean up created resources
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicy0Name, storageService0Name, storageClass0Name)
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicy1Name, storageService1Name, storageClass1Name)
-			return testCheckVolumeDelete(s)
-		},
+		CheckDestroy:      testCheckVolumeDelete,
 		ProviderFactories: testAccProvidersFactory,
 		Steps: []resource.TestStep{
 			testVolumeStep(volState0),
@@ -131,55 +124,20 @@ func TestAccVolume_basic(t *testing.T) {
 }
 
 func TestAccVolume_eradicate(t *testing.T) {
-	ctx := setupTestCtx(t)
-
-	// Setup resources we need
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
-	utilities.TraceError(ctx, err)
-
-	ts := testFusionResource{RName: "ts", Name: acctest.RandomWithPrefix("ts-volTest")}
-	pg := testFusionResource{RName: "pg", Name: acctest.RandomWithPrefix("pg-volTest")}
-
-	storageServiceName := acctest.RandomWithPrefix("ss-volTest")
-	protectionPolicyName := acctest.RandomWithPrefix("pp-volTest")
-	storageClassName := acctest.RandomWithPrefix("sc-volTest")
-
-	commonConfig := "" +
-		testTenantSpaceConfigWithNames(ts.RName, "ts display name", ts.Name, testAccTenant) +
-		testPGConfig("", pg.RName, pg.Name, "pg display name", region_name, availability_zone_name, storageServiceName, true) +
-		""
+	utilities.CheckTestSkip(t)
 
 	eradicate := true
-
-	volState := testVolume{
-		RName:                acctest.RandomWithPrefix("test_volume"),
-		Name:                 acctest.RandomWithPrefix("test_vol"),
-		DisplayName:          "initial display name",
-		TenantSpace:          ts,
-		ProtectionPolicyName: protectionPolicyName,
-		StorageClassName:     storageClassName,
-		PlacementGroup:       pg,
-		Size:                 1 << 20,
-		Eradicate:            &eradicate,
-	}
+	volState, commonConfig := generateVolumeTestConfigAndCommonTFConfig(&eradicate, []string{"flash-array-x"}, nil)
 
 	volState1 := volState
 	volState1.Eradicate = nil
 
-	hwType := "flash-array-x"
-
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			// Create extra resources required by volume
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName, hwType)
 		},
 		ProviderFactories: testAccProvidersFactory,
-		CheckDestroy: func(s *terraform.State) error {
-			// Clean up created resources
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName)
-			return testCheckVolumeDelete(s)
-		},
+		CheckDestroy:      testCheckVolumeDelete,
 		Steps: []resource.TestStep{
 			{
 				// Explicitly set `eradicate_on_delete=true` during volume creation
@@ -206,52 +164,15 @@ func TestAccVolume_eradicate(t *testing.T) {
 }
 
 func TestAccVolume_destroyOnly(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	volState, commonConfig := generateVolumeTestConfigAndCommonTFConfig(nil, []string{"flash-array-x"}, nil)
 	ctx := setupTestCtx(t)
-
-	// Setup resources we need
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
-	utilities.TraceError(ctx, err)
-
-	ts := testFusionResource{RName: "ts", Name: acctest.RandomWithPrefix("ts-volTest")}
-	pg := testFusionResource{RName: "pg", Name: acctest.RandomWithPrefix("pg-volTest")}
-
-	storageServiceName := acctest.RandomWithPrefix("ss-volTest")
-	protectionPolicyName := acctest.RandomWithPrefix("pp-volTest")
-	storageClassName := acctest.RandomWithPrefix("sc-volTest")
-
-	commonConfig := "" +
-		testTenantSpaceConfigWithNames(ts.RName, "ts display name", ts.Name, testAccTenant) +
-		testPGConfig("", pg.RName, pg.Name, "pg display name", region_name, availability_zone_name, storageServiceName, true) +
-		""
-
-	volState := testVolume{
-		RName:                acctest.RandomWithPrefix("test_volume"),
-		Name:                 acctest.RandomWithPrefix("test_vol"),
-		DisplayName:          "initial display name",
-		TenantSpace:          ts,
-		ProtectionPolicyName: protectionPolicyName,
-		StorageClassName:     storageClassName,
-		PlacementGroup:       pg,
-		Size:                 1 << 20,
-		Eradicate:            nil, // do not eradicate (can be also pointer to variable set to false)
-	}
-
-	hwType := "flash-array-x"
+	hmClient := testAccPreCheckWithReturningClient(ctx, t)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheck(t)
-			// Create extra resources required by volume
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName, hwType)
-		},
 		ProviderFactories: testAccProvidersFactory,
-		CheckDestroy: func(s *terraform.State) error {
-			// Clean up created resources
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName)
-
-			// Now the volume should be eradicated
-			return testCheckVolumeDelete(s)
-		},
+		CheckDestroy:      testCheckVolumeDelete,
 		Steps: []resource.TestStep{
 			{
 				// Create volume with set `eradicate_on_delete=false` (implicit)
@@ -262,14 +183,13 @@ func TestAccVolume_destroyOnly(t *testing.T) {
 				Config: commonConfig,
 				Check: func(s *terraform.State) error {
 					// Volume should exist and be destroyed. Not eradicated
-					if err := testCheckVolumeDestroy(volState.Name, testAccTenant, ts.Name)(s); err != nil {
+					if err := testCheckVolumeDestroy(volState.Name, volState.Tenant, volState.TenantSpace)(s); err != nil {
 						return err
 					}
-
 					// Eradicate the volume (test cleanup). This is workaround, because we have to eradicate the volume
 					// before we try to delete resources defined in `commonConfig`
 					testVolumeDoOperation(t, ctx, hmClient, "volume eradicate")(
-						hmClient.VolumesApi.DeleteVolume(ctx, testAccTenant, ts.Name, volState.Name, nil),
+						hmClient.VolumesApi.DeleteVolume(ctx, volState.Tenant, volState.TenantSpace, volState.Name, nil),
 					)
 
 					return nil
@@ -280,44 +200,17 @@ func TestAccVolume_destroyOnly(t *testing.T) {
 }
 
 func TestAccVolume_copyFromVolume(t *testing.T) {
-	ctx := setupTestCtx(t)
-
-	// Setup resources we need
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
-	utilities.TraceError(ctx, err)
-
-	ts := testFusionResource{RName: "ts", Name: acctest.RandomWithPrefix("ts-volTest")}
-	pg := testFusionResource{RName: "pg", Name: acctest.RandomWithPrefix("pg-volTest")}
-
-	storageServiceName := acctest.RandomWithPrefix("ss-volTest")
-	protectionPolicyName := acctest.RandomWithPrefix("pp-volTest")
-	storageClassName := acctest.RandomWithPrefix("sc-volTest")
-
-	commonConfig := "" +
-		testTenantSpaceConfigWithNames(ts.RName, "ts display name", ts.Name, testAccTenant) +
-		testPGConfig("", pg.RName, pg.Name, "pg display name", region_name, availability_zone_name, storageServiceName, true) +
-		""
+	utilities.CheckTestSkip(t)
 
 	eradicate := true
-
-	volState := testVolume{
-		RName:                acctest.RandomWithPrefix("test_volume"),
-		Name:                 acctest.RandomWithPrefix("test_vol"),
-		DisplayName:          "initial display name",
-		TenantSpace:          ts,
-		ProtectionPolicyName: protectionPolicyName,
-		StorageClassName:     storageClassName,
-		PlacementGroup:       pg,
-		Size:                 1 << 20,
-		Eradicate:            &eradicate,
-	}
+	volState, commonConfig := generateVolumeTestConfigAndCommonTFConfig(&eradicate, []string{"flash-array-x"}, nil)
 
 	volState1 := volState
 	volState1.RName = acctest.RandomWithPrefix("test_volume")
 	volState1.Name = acctest.RandomWithPrefix("test_vol")
 	volState1.SourceLink = map[string]string{
-		"tenant":       testAccTenant,
-		"tenant_space": ts.Name,
+		"tenant":       volState.Tenant,
+		"tenant_space": volState.TenantSpace,
 		"volume":       volState.Name,
 	}
 
@@ -325,20 +218,13 @@ func TestAccVolume_copyFromVolume(t *testing.T) {
 	volState2.SourceLink = nil
 
 	volStateResource := "fusion_volume." + volState1.RName
-	hwType := "flash-array-x"
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheck(t)
-			// Create extra resources required by volume
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName, hwType)
 		},
 		ProviderFactories: testAccProvidersFactory,
-		CheckDestroy: func(s *terraform.State) error {
-			// Clean up created resources
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName)
-			return testCheckVolumeDelete(s)
-		},
+		CheckDestroy:      testCheckVolumeDelete,
 		Steps: []resource.TestStep{
 			{
 				// Create a volume
@@ -379,64 +265,28 @@ func TestAccVolume_copyFromVolume(t *testing.T) {
 }
 
 func TestAccVolume_copyFromSnapshot(t *testing.T) {
-	ctx := setupTestCtx(t)
-
-	// Setup resources we need
-	hmClient, err := NewHMClient(ctx, testURL, testIssuer, testPrivKey)
-	utilities.TraceError(ctx, err)
-
-	ts := testFusionResource{RName: "ts", Name: acctest.RandomWithPrefix("ts-volTest")}
-	pg := testFusionResource{RName: "pg", Name: acctest.RandomWithPrefix("pg-volTest")}
-
-	storageServiceName := acctest.RandomWithPrefix("ss-volTest")
-	protectionPolicyName := acctest.RandomWithPrefix("pp-volTest")
-	storageClassName := acctest.RandomWithPrefix("sc-volTest")
-
-	commonConfig := "" +
-		testTenantSpaceConfigWithNames(ts.RName, "ts display name", ts.Name, testAccTenant) +
-		testPGConfig("", pg.RName, pg.Name, "pg display name", region_name, availability_zone_name, storageServiceName, true) +
-		""
+	utilities.CheckTestSkip(t)
 
 	eradicate := true
-
-	volState := testVolume{
-		RName:                acctest.RandomWithPrefix("test_volume"),
-		Name:                 acctest.RandomWithPrefix("test_vol"),
-		DisplayName:          "initial display name",
-		TenantSpace:          ts,
-		ProtectionPolicyName: protectionPolicyName,
-		StorageClassName:     storageClassName,
-		PlacementGroup:       pg,
-		Size:                 1 << 20,
-		Eradicate:            &eradicate,
-	}
+	volState, commonConfig := generateVolumeTestConfigAndCommonTFConfig(&eradicate, []string{"flash-array-x"}, nil)
 
 	snapshotName := acctest.RandomWithPrefix("snapshot")
+	ctx := setupTestCtx(t)
+	hmClient := testAccPreCheckWithReturningClient(ctx, t)
 
 	volState1 := volState
 	volState1.RName = acctest.RandomWithPrefix("test_volume")
 	volState1.Name = acctest.RandomWithPrefix("test_vol")
 	volState1.SourceLink = map[string]string{
-		"tenant":          testAccTenant,
-		"tenant_space":    ts.Name,
+		"tenant":          volState.Tenant,
+		"tenant_space":    volState.TenantSpace,
 		"snapshot":        snapshotName,
 		"volume_snapshot": volState.Name,
 	}
 
-	hwType := "flash-array-x"
-
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheck(t)
-			// Create extra resources required by volume
-			testSetupVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName, hwType)
-		},
 		ProviderFactories: testAccProvidersFactory,
-		CheckDestroy: func(s *terraform.State) error {
-			// Clean up created resources
-			testDeleteVolumeResources(t, ctx, hmClient, protectionPolicyName, storageServiceName, storageClassName)
-			return testCheckVolumeDelete(s)
-		},
+		CheckDestroy:      testCheckVolumeDelete,
 		Steps: []resource.TestStep{
 			{
 				// Create a volume
@@ -453,7 +303,7 @@ func TestAccVolume_copyFromSnapshot(t *testing.T) {
 					}
 
 					testVolumeDoOperation(t, ctx, hmClient, "snapshot-create")(
-						hmClient.SnapshotsApi.CreateSnapshot(ctx, snapPost, testAccTenant, ts.Name, nil),
+						hmClient.SnapshotsApi.CreateSnapshot(ctx, snapPost, volState.Tenant, volState.TenantSpace, nil),
 					)
 
 					return nil
@@ -481,6 +331,45 @@ func TestAccVolume_copyFromSnapshot(t *testing.T) {
 	})
 }
 
+func TestAccVolume_recovery(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	eradicate := true
+	volState, commonConfig := generateVolumeTestConfigAndCommonTFConfig(&eradicate, []string{"flash-array-x"}, nil)
+	ctx := setupTestCtx(t)
+	hmClient := testAccPreCheckWithReturningClient(ctx, t)
+
+	resource.ParallelTest(t, resource.TestCase{
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckVolumeDelete,
+		Steps: []resource.TestStep{
+			{
+				// Create a volume
+				Config: commonConfig + testVolumeConfig(volState),
+				Check:  testVolumeExists("fusion_volume."+volState.RName, t),
+			},
+			{
+				// Run `terraform import "fusion_volume.<rname>" /tenants/<tenant>/tenant-spaces/<ts>/volumes/<volume>`
+				// Manually destroy the volume, so that it can be recovered
+				// The imported state is compared the the state in the previous step - we cannot delete the volume by
+				// removing it from the config
+				PreConfig: func() {
+					// Destroy the volume
+					body := hmrest.VolumePatch{Destroyed: &hmrest.NullableBoolean{Value: true}}
+					testVolumeDoOperation(t, ctx, hmClient, "volume delete")(
+						hmClient.VolumesApi.UpdateVolume(ctx, body, volState.Tenant, volState.TenantSpace, volState.Name, nil),
+					)
+				},
+				ImportState:             true,
+				ImportStateId:           fmt.Sprintf("/tenants/%s/tenant-spaces/%s/volumes/%s", volState.Tenant, volState.TenantSpace, volState.Name),
+				ResourceName:            "fusion_volume." + volState.RName,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"eradicate_on_delete"},
+			},
+		},
+	})
+}
+
 // Verify resource with a direct hmrest call
 func testVolumeExists(rName string, t *testing.T) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -493,11 +382,11 @@ func testVolumeExists(rName string, t *testing.T) resource.TestCheckFunc {
 		}
 		attrs := volume.Primary.Attributes
 
-		directVolume, _, err := testAccProvider.Meta().(*hmrest.APIClient).VolumesApi.GetVolume(context.Background(), testAccTenant, attrs["tenant_space_name"], attrs["name"], nil)
+		directVolume, _, err := testAccProvider.Meta().(*hmrest.APIClient).VolumesApi.GetVolumeById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
-		tfHostNameCount, _ := strconv.Atoi(attrs["host_names.#"])
+		tfHostNameCount, _ := strconv.Atoi(attrs["host_access_policies.#"])
 
 		directHosts := []string{}
 		for _, directHost := range directVolume.HostAccessPolicies {
@@ -506,7 +395,7 @@ func testVolumeExists(rName string, t *testing.T) resource.TestCheckFunc {
 		sort.Slice(directHosts, func(i, j int) bool { return strings.Compare(directHosts[i], directHosts[j]) < 0 })
 		tfHosts := []string{}
 		for i := 0; i < tfHostNameCount; i++ {
-			tfHosts = append(tfHosts, attrs[fmt.Sprintf("host_names.%d", i)])
+			tfHosts = append(tfHosts, attrs[fmt.Sprintf("host_access_policies.%d", i)])
 		}
 		sort.Slice(tfHosts, func(i, j int) bool { return strings.Compare(tfHosts[i], tfHosts[j]) < 0 })
 
@@ -521,11 +410,11 @@ func testVolumeExists(rName string, t *testing.T) resource.TestCheckFunc {
 
 		checkAttr(directVolume.Name, "name")
 		checkAttr(directVolume.DisplayName, "display_name")
-		checkAttr(directVolume.Tenant.Name, "tenant_name")
-		checkAttr(directVolume.TenantSpace.Name, "tenant_space_name")
-		checkAttr(directVolume.ProtectionPolicy.Name, "protection_policy_name")
-		checkAttr(directVolume.StorageClass.Name, "storage_class_name")
-		checkAttr(directVolume.PlacementGroup.Name, "placement_group_name")
+		checkAttr(directVolume.Tenant.Name, "tenant")
+		checkAttr(directVolume.TenantSpace.Name, "tenant_space")
+		checkAttr(directVolume.ProtectionPolicy.Name, "protection_policy")
+		checkAttr(directVolume.StorageClass.Name, "storage_class")
+		checkAttr(directVolume.PlacementGroup.Name, "placement_group")
 
 		if !reflect.DeepEqual(directHosts, tfHosts) {
 			t.Errorf("hosts mismatch")
@@ -551,13 +440,15 @@ type testVolume struct {
 	Name                 string
 	DisplayName          string
 	ProtectionPolicyName string
-	TenantSpace          testFusionResource
+	Tenant               string
+	TenantSpace          string
 	StorageClassName     string
-	PlacementGroup       testFusionResource
+	PlacementGroup       string
 	Size                 int
 	Hosts                []testFusionResource
 	Eradicate            *bool
 	SourceLink           map[string]string
+	StorageService       string
 }
 
 type testFusionResource struct {
@@ -589,21 +480,26 @@ func testVolumeConfigCopy(vol testVolume) string {
 		`, sourceLink)
 	}
 
+	hapField := ""
+	if len(hapList) != 0 {
+		hapField = fmt.Sprintf("host_access_policies = [%s]", strings.Join(hapList, ","))
+	}
+
 	return fmt.Sprintf(`
 resource "fusion_volume" "%[1]s" {
 		name          = "%[2]s"
 		display_name  = "%[3]s"
-		protection_policy_name = "%[4]s"
-		tenant_name        = "%[5]s"
-		tenant_space_name  = fusion_tenant_space.%[6]s.name
-		storage_class_name = "%[7]s"
-		host_names = [%[8]s]
-		placement_group_name = fusion_placement_group.%[9]s.name
+		protection_policy = fusion_protection_policy.%[4]s.name
+		tenant        = fusion_tenant.%[5]s.name
+		tenant_space  = fusion_tenant_space.%[6]s.name
+		storage_class = fusion_storage_class.%[7]s.name
+		%[8]s
+		placement_group = fusion_placement_group.%[9]s.name
 		%[10]s
 		%[11]s
 }`, vol.RName, vol.Name, vol.DisplayName, vol.ProtectionPolicyName,
-		testAccTenant, vol.TenantSpace.RName, vol.StorageClassName,
-		strings.Join(hapList, ","), vol.PlacementGroup.RName, eradicate, sourceLink)
+		vol.Tenant, vol.TenantSpace, vol.StorageClassName,
+		hapField, vol.PlacementGroup, eradicate, sourceLink)
 }
 
 func testVolumeConfig(vol testVolume) string {
@@ -617,34 +513,47 @@ func testVolumeConfig(vol testVolume) string {
 		eradicate = fmt.Sprintf("eradicate_on_delete = %t", *vol.Eradicate)
 	}
 
+	protectionPolicy := ""
+	if vol.ProtectionPolicyName != "" {
+		protectionPolicy = fmt.Sprintf("protection_policy = fusion_protection_policy.%[1]s.name", vol.ProtectionPolicyName)
+	}
+
+	hapField := ""
+	if len(hapList) != 0 {
+		hapField = fmt.Sprintf("host_access_policies = [%s]", strings.Join(hapList, ","))
+	}
+
 	return fmt.Sprintf(`
 resource "fusion_volume" "%[1]s" {
 		name          = "%[2]s"
 		display_name  = "%[3]s"
-		protection_policy_name = "%[4]s"
-		tenant_name        = "%[5]s"
-		tenant_space_name  = fusion_tenant_space.%[6]s.name
-		storage_class_name = "%[7]s"
+		%[4]s
+		tenant        = fusion_tenant.%[5]s.name
+		tenant_space  = fusion_tenant_space.%[6]s.name
+		storage_class = fusion_storage_class.%[7]s.name
 		size          = %[8]d
-		host_names = [%[9]s]
-		placement_group_name = fusion_placement_group.%[10]s.name
+		%[9]s
+		placement_group = fusion_placement_group.%[10]s.name
 		%[11]s
-}`, vol.RName, vol.Name, vol.DisplayName, vol.ProtectionPolicyName,
-		testAccTenant, vol.TenantSpace.RName, vol.StorageClassName,
-		vol.Size, strings.Join(hapList, ","), vol.PlacementGroup.RName, eradicate)
+}`, vol.RName, vol.Name, vol.DisplayName, protectionPolicy,
+		vol.Tenant, vol.TenantSpace, vol.StorageClassName,
+		vol.Size, hapField, vol.PlacementGroup, eradicate)
 }
 
 func testCheckVolumeDelete(s *terraform.State) error {
-	client := testAccProvider.Meta().(*hmrest.APIClient)
-
 	for _, rs := range s.RootModule().Resources {
+		client := testAccProvider.Meta().(*hmrest.APIClient)
+
 		if rs.Type != "fusion_volume" {
 			continue
 		}
 		attrs := rs.Primary.Attributes
-		volumeName := attrs["name"]
-		tenantName := attrs["tenant_name"]
-		tenantSpaceName := attrs["tenant_space_name"]
+		tenantName := attrs["tenant"]
+		tenantSpaceName := attrs["tenant_space"]
+		volumeName, ok := attrs["name"]
+		if !ok {
+			continue // Skip data sources
+		}
 
 		_, resp, err := client.VolumesApi.GetVolume(context.Background(), tenantName, tenantSpaceName, volumeName, nil)
 		if err != nil && resp.StatusCode == http.StatusNotFound {
@@ -657,9 +566,9 @@ func testCheckVolumeDelete(s *terraform.State) error {
 }
 
 func testCheckVolumeDestroy(name, tenantName, tenantSpaceName string) func(s *terraform.State) error {
-	client := testAccProvider.Meta().(*hmrest.APIClient)
-
 	return func(s *terraform.State) error {
+		client := testAccProvider.Meta().(*hmrest.APIClient)
+
 		volume, resp, err := client.VolumesApi.GetVolume(context.Background(), tenantName, tenantSpaceName, name, nil)
 		if err != nil {
 			return err
@@ -681,12 +590,12 @@ func testCheckVolumeAttributes(resourceName string, volState testVolume) resourc
 	return resource.ComposeTestCheckFunc(
 		resource.TestCheckResourceAttr(resourceName, "name", volState.Name),
 		resource.TestCheckResourceAttr(resourceName, "display_name", volState.DisplayName),
-		resource.TestCheckResourceAttr(resourceName, "tenant_name", testAccTenant),
-		resource.TestCheckResourceAttr(resourceName, "tenant_space_name", volState.TenantSpace.Name),
-		resource.TestCheckResourceAttr(resourceName, "protection_policy_name", volState.ProtectionPolicyName),
-		resource.TestCheckResourceAttr(resourceName, "storage_class_name", volState.StorageClassName),
-		resource.TestCheckResourceAttr(resourceName, "placement_group_name", volState.PlacementGroup.Name),
-		resource.TestCheckResourceAttr(resourceName, "host_names.#", fmt.Sprintf("%d", len(volState.Hosts))),
+		resource.TestCheckResourceAttr(resourceName, "tenant", volState.Tenant),
+		resource.TestCheckResourceAttr(resourceName, "tenant_space", volState.TenantSpace),
+		resource.TestCheckResourceAttr(resourceName, "protection_policy", volState.ProtectionPolicyName),
+		resource.TestCheckResourceAttr(resourceName, "storage_class", volState.StorageClassName),
+		resource.TestCheckResourceAttr(resourceName, "placement_group", volState.PlacementGroup),
+		resource.TestCheckResourceAttr(resourceName, "host_access_policies.#", fmt.Sprintf("%d", len(volState.Hosts))),
 	)
 }
 
@@ -705,55 +614,41 @@ func testVolumeDoOperation(
 	}
 }
 
-// Will be redundant once we implement more resources
-func testSetupVolumeResources(
-	t *testing.T,
-	ctx context.Context,
-	hmClient *hmrest.APIClient,
-	protectionPolicyName,
-	storageServiceName string,
-	storageClassName string,
-	hwType string,
-) {
-	testVolumeDoOperation(t, ctx, hmClient, protectionPolicyName)(
-		hmClient.ProtectionPoliciesApi.CreateProtectionPolicy(ctx, hmrest.ProtectionPolicyPost{
-			Name: protectionPolicyName,
-			Objectives: []hmrest.OneOfProtectionPolicyPostObjectivesItems{
-				hmrest.Rpo{Type_: "RPO", Rpo: "PT6H"},
-				hmrest.Retention{Type_: "Retention", After: "PT24H"},
-			},
-		}, nil),
-	)
+func generateVolumeTestConfigAndCommonTFConfig(eradicate *bool, hwTypes []string, array *string) (testVolume, string) {
+	protectionPolicyName := acctest.RandomWithPrefix("pp-volTest")
+	storageClassName := acctest.RandomWithPrefix("sc-volTest")
 
-	testVolumeDoOperation(t, ctx, hmClient, storageServiceName)(
-		hmClient.StorageServicesApi.CreateStorageService(ctx, hmrest.StorageServicePost{
-			Name:          storageServiceName,
-			HardwareTypes: []string{hwType},
-		}, nil),
-	)
+	cfg, commonConfig := generatePlacementGroupTestConfigAndCommonTFConfig(hwTypes)
 
-	testVolumeDoOperation(t, ctx, hmClient, storageClassName)(
-		hmClient.StorageClassesApi.CreateStorageClass(ctx, hmrest.StorageClassPost{
-			Name:           storageClassName,
-			SizeLimit:      1 << 22,
-			BandwidthLimit: 1e9,
-			IopsLimit:      100,
-		}, storageServiceName, nil),
-	)
-}
+	if array == nil {
+		commonConfig += testPlacementGroupConfigWithRefsNoArray(
+			cfg.Name, cfg.Name, cfg.DisplayName, cfg.Tenant, cfg.TenantSpace, cfg.Region, cfg.AZ, cfg.StorageService, true,
+		)
+	} else {
+		commonConfig += testPlacementGroupConfigWithRefs(
+			cfg.Name, cfg.Name, cfg.DisplayName, cfg.Tenant, cfg.TenantSpace, cfg.Region, cfg.AZ, cfg.StorageService, *array, true,
+		)
+	}
 
-func testDeleteVolumeResources(
-	t *testing.T, ctx context.Context, hmClient *hmrest.APIClient, protectionPolicyName, storageServiceName, storageClassName string,
-) {
-	testVolumeDoOperation(t, ctx, hmClient, protectionPolicyName)(
-		hmClient.ProtectionPoliciesApi.DeleteProtectionPolicy(ctx, protectionPolicyName, nil),
-	)
+	commonConfig += testStorageClassConfigNoDisplayName(storageClassName, storageClassName, cfg.StorageService, testSizeLimit, testIopsLimit, testBandwidthLimit) +
+		testAccProtectionPolicyConfig(protectionPolicyName, protectionPolicyName, protectionPolicyName, localRPO, localRetention, true)
 
-	testVolumeDoOperation(t, ctx, hmClient, storageClassName)(
-		hmClient.StorageClassesApi.DeleteStorageClass(ctx, storageServiceName, storageClassName, nil),
-	)
+	volCfg := testVolume{
+		RName:                acctest.RandomWithPrefix("test_volume"),
+		Name:                 acctest.RandomWithPrefix("test_vol"),
+		DisplayName:          "initial display name",
+		Tenant:               cfg.Tenant,
+		TenantSpace:          cfg.TenantSpace,
+		ProtectionPolicyName: protectionPolicyName,
+		StorageClassName:     storageClassName,
+		PlacementGroup:       cfg.Name,
+		Size:                 1 << 20,
+		StorageService:       cfg.StorageService,
+	}
 
-	testVolumeDoOperation(t, ctx, hmClient, storageServiceName)(
-		hmClient.StorageServicesApi.DeleteStorageService(ctx, storageServiceName, nil),
-	)
+	if eradicate != nil {
+		volCfg.Eradicate = eradicate
+	}
+
+	return volCfg, commonConfig
 }

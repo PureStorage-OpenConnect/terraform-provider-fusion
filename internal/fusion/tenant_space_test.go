@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -22,6 +23,8 @@ import (
 
 // Creates and destroys
 func TestAccTenantSpace_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_space_test")
 	rName := "fusion_tenant_space." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
@@ -51,6 +54,8 @@ func TestAccTenantSpace_basic(t *testing.T) {
 
 // Updates display name
 func TestAccTenantSpace_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_space_test")
 	rName := "fusion_tenant_space." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
@@ -115,6 +120,8 @@ func TestAccTenantSpace_update(t *testing.T) {
 }
 
 func TestAccTenantSpace_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_space_test")
 	rName := "fusion_tenant_space." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
@@ -164,6 +171,8 @@ func TestAccTenantSpace_attributes(t *testing.T) {
 }
 
 func TestAccTenantSpace_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("tenant_space_test")
 	rName := "fusion_tenant_space." + rNameConfig
 	displayName1 := acctest.RandomWithPrefix("tenant-space-display-name")
@@ -202,6 +211,54 @@ func TestAccTenantSpace_multiple(t *testing.T) {
 	})
 }
 
+func TestAccTenantSpace_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("tenant_space_test")
+	rName := "fusion_tenant_space." + rNameConfig
+	displayName := acctest.RandomWithPrefix("tenant-space-display-name")
+	tenantSpaceName := acctest.RandomWithPrefix("test_ts")
+
+	tenant := acctest.RandomWithPrefix("ts_test_tenant")
+	commonConfig := testTenantConfig(tenant, tenant, tenant)
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckTenantSpaceDestroy,
+		Steps: []resource.TestStep{
+			// Create Tenant Space and validate it's fields
+			{
+				Config: commonConfig + testTenantSpaceConfigWithRefs(rNameConfig, displayName, tenantSpaceName, tenant),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", tenantSpaceName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "tenant", tenant),
+					testTenantSpaceExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_tenant_space.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/tenants/%[1]s/tenant-spaces/%[2]s", tenant, tenantSpaceName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_tenant_space.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/tenants/%[1]s/tenant-spaces/wrong-%[2]s", tenant, tenantSpaceName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_tenant_space.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/tenant-spaces/%[2]s", tenant, tenantSpaceName),
+				ExpectError:   regexp.MustCompile("invalid tenant_space import path. Expected path in format '/tenants/<tenant>/tenant-spaces/<tenant-space>'"),
+			},
+		},
+	})
+}
+
 func testTenantSpaceExists(rName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		tfTenantSpace, ok := s.RootModule().Resources[rName]
@@ -213,9 +270,9 @@ func testTenantSpaceExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfTenantSpace.Primary.Attributes
 
-		goclientTenantSpace, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantSpacesApi.GetTenantSpace(context.Background(), attrs["tenant"], attrs["name"], nil)
+		goclientTenantSpace, _, err := testAccProvider.Meta().(*hmrest.APIClient).TenantSpacesApi.GetTenantSpaceById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("go client retutrned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("go client retutrned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientTenantSpace.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientTenantSpace.DisplayName, attrs["display_name"]) != 0 ||

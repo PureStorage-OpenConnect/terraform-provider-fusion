@@ -30,6 +30,8 @@ var (
 )
 
 func TestAccProtectionPolicy_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("fusion_protection_policy_test")
 	rName := "fusion_protection_policy." + rNameConfig
 	policyName := acctest.RandomWithPrefix("pp-name")
@@ -41,7 +43,7 @@ func TestAccProtectionPolicy_basic(t *testing.T) {
 		CheckDestroy:      testAccCheckProtectionPolicyDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, localRetention),
+				Config: testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, localRetention, true),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rName, "name", policyName),
 					resource.TestCheckResourceAttr(rName, "display_name", displayName),
@@ -54,7 +56,48 @@ func TestAccProtectionPolicy_basic(t *testing.T) {
 	})
 }
 
+func TestAccProtectionPolicy_update(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("fusion_protection_policy_test")
+	rName := "fusion_protection_policy." + rNameConfig
+	policyName := acctest.RandomWithPrefix("pp-name")
+	displayName := acctest.RandomWithPrefix("pp-display-name")
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testAccCheckProtectionPolicyDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, localRetention, true),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", policyName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "local_rpo", localRPO),
+					resource.TestCheckResourceAttr(rName, "local_retention", "7200"),
+					resource.TestCheckResourceAttr(rName, "destroy_snapshots_on_delete", "true"),
+					testAccCheckProtectionPolicyExists(rName),
+				),
+			},
+			{
+				Config: testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, localRetention, false),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", policyName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "local_rpo", localRPO),
+					resource.TestCheckResourceAttr(rName, "local_retention", "7200"),
+					resource.TestCheckResourceAttr(rName, "destroy_snapshots_on_delete", "false"),
+					testAccCheckProtectionPolicyExists(rName),
+				),
+			},
+		},
+	})
+}
+
 func TestAccProtectionPolicy_attributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("fusion_protection_policy_test")
 	policyName := acctest.RandomWithPrefix("pp-name")
 	displayName := acctest.RandomWithPrefix("pp-display-name")
@@ -67,31 +110,31 @@ func TestAccProtectionPolicy_attributes(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Values should not pass validations
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, "", displayName, localRPO, localRetention),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, "", displayName, localRPO, localRetention, true),
 				ExpectError: regexp.MustCompile(`expected "name" to not be an empty string`),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, "bad name here", displayName, localRPO, localRetention),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, "bad name here", displayName, localRPO, localRetention, true),
 				ExpectError: regexp.MustCompile("name must use alphanumeric characters"),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayNameTooBig, localRPO, localRetention),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayNameTooBig, localRPO, localRetention, true),
 				ExpectError: regexp.MustCompile(`expected length of display_name to be in the range \(1 - 256\), got .{257}`),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, "", localRPO, localRetention),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, "", localRPO, localRetention, true),
 				ExpectError: regexp.MustCompile(`expected length of display_name to be in the range \(1 - 256\), .?`),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, "1", localRetention),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, "1", localRetention, true),
 				ExpectError: regexp.MustCompile(`expected local_rpo to be at least \(10\), got 1`),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, ""),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, "", true),
 				ExpectError: regexp.MustCompile("Bad local retention"),
 			},
 			{
-				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, "0"),
+				Config:      testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, "0", true),
 				ExpectError: regexp.MustCompile("Bad local retention"),
 			},
 		},
@@ -99,6 +142,8 @@ func TestAccProtectionPolicy_attributes(t *testing.T) {
 }
 
 func TestAccProtectionPolicy_multiple(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig1 := acctest.RandomWithPrefix("fusion_protection_policy_test")
 	rName1 := "fusion_protection_policy." + rNameConfig1
 	policyName1 := acctest.RandomWithPrefix("pp-name")
@@ -116,8 +161,8 @@ func TestAccProtectionPolicy_multiple(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Sanity check two can be created at once
 			{
-				Config: testAccProtectionPolicyConfig(rNameConfig1, policyName1, displayName1, localRPO, localRetention) + "\n" +
-					testAccProtectionPolicyConfig(rNameConfig2, policyName2, displayName2, localRPO, localRetention),
+				Config: testAccProtectionPolicyConfig(rNameConfig1, policyName1, displayName1, localRPO, localRetention, true) + "\n" +
+					testAccProtectionPolicyConfig(rNameConfig2, policyName2, displayName2, localRPO, localRetention, true),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckProtectionPolicyExists(rName1),
 					testAccCheckProtectionPolicyExists(rName2),
@@ -125,10 +170,58 @@ func TestAccProtectionPolicy_multiple(t *testing.T) {
 			},
 			// Create two with same name
 			{
-				Config: testAccProtectionPolicyConfig(rNameConfig1, policyName1, displayName1, localRPO, localRetention) + "\n" +
-					testAccProtectionPolicyConfig(rNameConfig2, policyName2, displayName2, localRPO, localRetention) + "\n" +
-					testAccProtectionPolicyConfig("conflictRN", policyName1, "conflictDN", localRPO, localRetention),
+				Config: testAccProtectionPolicyConfig(rNameConfig1, policyName1, displayName1, localRPO, localRetention, true) + "\n" +
+					testAccProtectionPolicyConfig(rNameConfig2, policyName2, displayName2, localRPO, localRetention, true) + "\n" +
+					testAccProtectionPolicyConfig("conflictRN", policyName1, "conflictDN", localRPO, localRetention, true),
 				ExpectError: regexp.MustCompile("already exists"),
+			},
+		},
+	})
+}
+
+func TestAccProtectionPolicy_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("fusion_protection_policy_test")
+	rName := "fusion_protection_policy." + rNameConfig
+	policyName := acctest.RandomWithPrefix("pp-name")
+	displayName := acctest.RandomWithPrefix("pp-display-name")
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testAccCheckProtectionPolicyDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProtectionPolicyConfig(rNameConfig, policyName, displayName, localRPO, localRetention, true),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", policyName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "local_rpo", localRPO),
+					resource.TestCheckResourceAttr(rName, "local_retention", "7200"),
+					testAccCheckProtectionPolicyExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_protection_policy.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/protection-policies/%s", policyName),
+				ImportStateVerify: true,
+				// skipping destroy_snapshots_on_delete field, this field is used as additional parameter for deletion
+				// destroy_snapshots_on_delete cannot be imported from harbormaster
+				ImportStateVerifyIgnore: []string{optionDestroySnapshotsOnDelete},
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_protection_policy.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/protection-policies/wrong-%s", policyName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_protection_policy.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/%s", policyName),
+				ExpectError:   regexp.MustCompile("invalid protection_policy import path. Expected path in format '/protection-policies/<protection-policy>'"),
 			},
 		},
 	})
@@ -145,10 +238,11 @@ func testAccCheckProtectionPolicyExists(rName string) resource.TestCheckFunc {
 		}
 		savedPolicy := tfResource.Primary.Attributes
 		policyName := savedPolicy["name"]
+		policyId := savedPolicy["id"]
 
-		foundPolicy, _, err := testAccProvider.Meta().(*hmrest.APIClient).ProtectionPoliciesApi.GetProtectionPolicy(context.Background(), policyName, nil)
+		foundPolicy, _, err := testAccProvider.Meta().(*hmrest.APIClient).ProtectionPoliciesApi.GetProtectionPolicyById(context.Background(), policyId, nil)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", policyName, err)
+			return fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", policyName, policyId, err)
 		}
 
 		var errs error
@@ -195,8 +289,12 @@ func testAccCheckProtectionPolicyDestroy(s *terraform.State) error {
 			continue
 		}
 		attrs := rs.Primary.Attributes
+		name, ok := attrs["name"]
+		if !ok {
+			continue // Skip data sources
+		}
 
-		_, resp, err := client.ProtectionPoliciesApi.GetProtectionPolicy(context.Background(), attrs["name"], nil)
+		_, resp, err := client.ProtectionPoliciesApi.GetProtectionPolicy(context.Background(), name, nil)
 		if err != nil && resp.StatusCode == http.StatusNotFound {
 			continue
 		}
@@ -205,13 +303,14 @@ func testAccCheckProtectionPolicyDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testAccProtectionPolicyConfig(rName, name, displayName, localRPO, localRetention string) string {
+func testAccProtectionPolicyConfig(rName, name, displayName, localRPO, localRetention string, destroySnap bool) string {
 	return fmt.Sprintf(`
 	resource "fusion_protection_policy" "%[1]s" {
 		name			= "%[2]s"
 		display_name	= "%[3]s"
 		local_rpo		= "%[4]s"
 		local_retention = "%[5]s"
+		destroy_snapshots_on_delete = "%[6]t"
 	}
-	`, rName, name, displayName, localRPO, localRetention)
+	`, rName, name, displayName, localRPO, localRetention, destroySnap)
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2022 Pure Storage Inc
+Copyright 2023 Pure Storage Inc
 SPDX-License-Identifier: Apache-2.0
 */
 
@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -19,79 +21,96 @@ import (
 )
 
 // This is our entry point for the Volume resource. Get it movin'
-func resourceVolume() *schema.Resource {
-
-	vp := &volumeProvider{BaseResourceProvider{ResourceKind: "Volume"}}
-	volumeResourceFunctions := NewBaseResourceFunctions("Volume", vp)
-
-	volumeResourceFunctions.Resource.Schema = map[string]*schema.Schema{
-		"name": {
-			Type:     schema.TypeString,
-			Required: true,
+func schemaVolume() map[string]*schema.Schema {
+	return map[string]*schema.Schema{
+		optionName: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Volume.",
 		},
-		"display_name": {
-			Type:     schema.TypeString,
-			Optional: true,
-			Computed: true,
+		optionDisplayName: {
+			Type:         schema.TypeString,
+			Optional:     true,
+			Computed:     true,
+			ValidateFunc: validation.StringLenBetween(1, maxDisplayName),
+			Description:  "The human-readable name of the Volume. If not provided, defaults to I(name).",
 		},
-		"size": {
-			Type:          schema.TypeInt,
-			Optional:      true,
-			Computed:      true,
-			ConflictsWith: []string{optionSourceLink},
+		optionSize: {
+			Type:             schema.TypeString,
+			Optional:         true,
+			Computed:         true,
+			ValidateDiagFunc: utilities.DataUnitsBeetween(volumeSizeMin, volumeSizeMax, 1024),
+			DiffSuppressFunc: utilities.GetDiffSuppressForDataUnits(1024),
+			ConflictsWith:    []string{optionSourceLink},
+			Description: `The Volume size in M, G, T or P units.
+			- Volume size in M, G, T or P units.
+			- Must be between 1MB and 4PB.`,
 		},
-		"tenant_name": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionTenant: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Tenant.",
 		},
-		"tenant_space_name": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionTenantSpace: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Tenant Space.",
 		},
-		"storage_class_name": {
-			Type:     schema.TypeString,
-			Required: true,
+		optionStorageClass: {
+			Type:         schema.TypeString,
+			Required:     true,
+			ValidateFunc: validation.StringIsNotEmpty,
+			Description:  "The name of the Storage Class.",
 		},
-		"placement_group_name": {
+		optionPlacementGroup: {
 			Type:        schema.TypeString,
 			Required:    true,
-			Description: "WARNING: Changing this value will cause a new IQN number to be generated and will disrupt initiator access to this volume",
+			Description: "The name of the Placement Group. WARNING: Changing this value will cause a new IQN number to be generated and will disrupt initiator access to this Volume.",
 		},
-		"protection_policy_name": {
-			Type:     schema.TypeString,
+		optionProtectionPolicy: {
+			Type:        schema.TypeString,
+			Optional:    true,
+			Description: "The name of the Protection Policy.",
+		},
+		optionHostAccessPolicies: {
+			Type:     schema.TypeSet,
 			Optional: true,
-		},
-		"host_names": {
-			Type:     schema.TypeSet,
-			Required: true,
 			Elem: &schema.Schema{
 				Type: schema.TypeString,
 			},
+			Description: "The list of Host Access Policies to connect the Volume to.",
 		},
-		"created_at": {
-			Type:     schema.TypeInt,
-			Computed: true,
+		optionCreatedAt: {
+			Type:        schema.TypeInt,
+			Computed:    true,
+			Description: "The time that the operation was created, in milliseconds since the Unix epoch.",
 		},
-		"serial_number": {
-			Type:     schema.TypeString,
-			Computed: true,
+		optionSerialNumber: {
+			Type:        schema.TypeString,
+			Computed:    true,
+			Description: "The serial number of the Volume.",
 		},
-		"target_iscsi_iqn": {
-			Type:     schema.TypeString,
-			Computed: true,
+		optionTargetIscsiIqn: {
+			Type:        schema.TypeString,
+			Computed:    true,
+			Description: "The IQN of the iSCSI target.",
 		},
-		"target_iscsi_addresses": {
+		optionTargetIscsiAddresses: {
 			Type:     schema.TypeSet,
 			Computed: true,
 			Elem: &schema.Schema{
-				Type: schema.TypeString,
+				Type:        schema.TypeString,
+				Description: "The address of the iSCSI target.",
 			},
 		},
-		"eradicate_on_delete": {
+		optionEradicateOnDelete: {
 			Type:        schema.TypeBool,
 			Optional:    true,
 			Default:     false,
-			Description: "Eradicate the volume when the volume is deleted.",
+			Description: "Eradicate the Volume when the Volume is deleted.",
 		},
 		optionSourceLink: {
 			Type:          schema.TypeList,
@@ -105,13 +124,13 @@ func resourceVolume() *schema.Resource {
 						Type:         schema.TypeString,
 						Required:     true,
 						ValidateFunc: validation.StringIsNotEmpty,
-						Description:  "The Tenant name.",
+						Description:  "The name of the Tenant.",
 					},
 					optionTenantSpace: {
 						Type:         schema.TypeString,
 						Required:     true,
 						ValidateFunc: validation.StringIsNotEmpty,
-						Description:  "The Tenant Space name.",
+						Description:  "The name of the Tenant Space.",
 					},
 					optionSnapshot: {
 						Type:          schema.TypeString,
@@ -125,7 +144,7 @@ func resourceVolume() *schema.Resource {
 						Type:          schema.TypeString,
 						Optional:      true,
 						ValidateFunc:  validation.StringIsNotEmpty,
-						Description:   "The Volume snapshot name.",
+						Description:   "The name of the Volume Snapshot.",
 						RequiredWith:  []string{getSourceLinkItem(optionSnapshot)},
 						ConflictsWith: []string{getSourceLinkItem(optionVolume)},
 					},
@@ -133,13 +152,24 @@ func resourceVolume() *schema.Resource {
 						Type:          schema.TypeString,
 						Optional:      true,
 						ValidateFunc:  validation.StringIsNotEmpty,
-						Description:   "The Volume name.",
+						Description:   "The name of the Volume.",
 						ConflictsWith: []string{getSourceLinkItem(optionVolumeSnapshot), getSourceLinkItem(optionSnapshot)},
 					},
 				},
 			},
 		},
 	}
+
+}
+
+func resourceVolume() *schema.Resource {
+	vp := &volumeProvider{BaseResourceProvider{ResourceKind: resourceKindVolume}}
+	volumeResourceFunctions := NewBaseResourceFunctions(resourceKindVolume, vp)
+
+	volumeResourceFunctions.Resource.Description = "A Volume represents a container that manages the storage space " +
+		"on the array. After a Volume has been created, establish a Host-Volume connection so that the Host can read data " +
+		"from and write data to the Volume."
+	volumeResourceFunctions.Resource.Schema = schemaVolume()
 
 	return volumeResourceFunctions.Resource
 }
@@ -150,28 +180,70 @@ type volumeProvider struct {
 }
 
 func (vp *volumeProvider) PrepareCreate(ctx context.Context, d *schema.ResourceData) (InvokeWriteAPI, ResourcePost, error) {
-	tenantName := rdString(ctx, d, "tenant_name")
-	tenantSpaceName := rdString(ctx, d, "tenant_space_name")
-	name := rdString(ctx, d, "name")
-	displayName := rdStringDefault(ctx, d, "display_name", name)
+	tenantName := rdString(ctx, d, optionTenant)
+	tenantSpaceName := rdString(ctx, d, optionTenantSpace)
+	name := rdString(ctx, d, optionName)
+	displayName := rdStringDefault(ctx, d, optionDisplayName, name)
+	size, _ := utilities.ConvertDataUnitsToInt64(rdString(ctx, d, optionSize), 1024)
 
 	body := hmrest.VolumePost{
 		Name:             name,
 		DisplayName:      displayName,
-		Size:             int64(rdInt(d, "size")),
-		StorageClass:     rdString(ctx, d, "storage_class_name"),
-		PlacementGroup:   rdString(ctx, d, "placement_group_name"),
-		ProtectionPolicy: rdString(ctx, d, "protection_policy_name"),
+		Size:             size,
+		StorageClass:     rdString(ctx, d, optionStorageClass),
+		PlacementGroup:   rdString(ctx, d, optionPlacementGroup),
+		ProtectionPolicy: rdString(ctx, d, optionProtectionPolicy),
 	}
 
 	if _, ok := d.GetOk(optionSourceLink); ok {
 		body.SourceLink = vp.getSourceLink(ctx, d)
+		body.Size = 0
 	}
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 		op, _, err := client.VolumesApi.CreateVolume(ctx, *body.(*hmrest.VolumePost), tenantName, tenantSpaceName, nil)
-		return &op, err
+		if err != nil {
+			return &op, err
+		}
+
+		succeeded, err := utilities.WaitOnOperation(ctx, &op, client)
+		if err != nil {
+			return &op, err
+		}
+
+		if !succeeded {
+			tflog.Error(ctx, "REST create volume failed", "error_message", op.Error_.Message,
+				"PureCode", op.Error_.PureCode, "HttpCode", op.Error_.HttpCode)
+
+			return &op, utilities.NewRestErrorFromOperation(&op)
+		}
+
+		d.SetId(op.Result.Resource.Id)
+
+		hosts := strings.Join(rdStringSet(ctx, d, optionHostAccessPolicies), ",")
+		patch := hmrest.VolumePatch{
+			HostAccessPolicies: &hmrest.NullableString{Value: hosts},
+		}
+
+		// Add hosts to the volume (cannot be done via POST)
+		tflog.Debug(ctx, "Starting operation to apply a (create) patch", "patch_op", "volumeUpdate", "patch", patch)
+		op, _, err = client.VolumesApi.UpdateVolume(ctx, patch, tenantName, tenantSpaceName, op.Result.Resource.Name, nil)
+		utilities.TraceOperation(ctx, &op, "Applying Volume Patch")
+		if err != nil {
+			return &op, err
+		}
+
+		succeeded, err = utilities.WaitOnOperation(ctx, &op, client)
+		if err != nil {
+			return &op, err
+		}
+		if !succeeded {
+			return &op, fmt.Errorf("operation failed Message:%s ID:%s", op.Error_.Message, op.Id)
+		}
+
+		return &op, nil
 	}
+
 	return fn, &body, nil
 }
 
@@ -181,34 +253,7 @@ func (vp *volumeProvider) ReadResource(ctx context.Context, client *hmrest.APICl
 		return err
 	}
 
-	hostNames := []string{}
-	for _, hap := range vol.HostAccessPolicies {
-		hostNames = append(hostNames, hap.Name)
-	}
-	err = d.Set("host_names", hostNames)
-	if err != nil {
-		return err
-	}
-
-	d.Set("tenant_name", vol.Tenant.Name)
-	d.Set("tenant_space_name", vol.TenantSpace.Name)
-	d.Set("storage_class_name", vol.StorageClass.Name)
-	d.Set("placement_group_name", vol.PlacementGroup.Name)
-	d.Set("name", vol.Name)
-	d.Set("display_name", vol.DisplayName)
-	d.Set("size", vol.Size)
-	d.Set("serial_number", vol.SerialNumber)
-	d.Set("created_at", vol.CreatedAt)
-	if vol.ProtectionPolicy != nil {
-		d.Set("protection_policy_name", vol.ProtectionPolicy.Name)
-	}
-	if vol.Target != nil {
-		if vol.Target.Iscsi != nil {
-			d.Set("target_iscsi_iqn", vol.Target.Iscsi.Iqn)
-			d.Set("target_iscsi_addresses", vol.Target.Iscsi.Addresses)
-		}
-	}
-	return nil
+	return vp.loadVolume(vol, d)
 }
 
 // ColumeProvider.PrepareUpdate will update the attributes of the volume.
@@ -217,17 +262,21 @@ func (vp *volumeProvider) ReadResource(ctx context.Context, client *hmrest.APICl
 // extending volumes is supported at this time, since truncating volumes can
 // lead to data loss.
 func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, []ResourcePatch, error) {
-	volumeName := d.Get("name").(string)
-	tenantSpaceName := d.Get("tenant_space_name").(string)
-	tenantName := d.Get("tenant_name").(string)
+	if err := utilities.CheckImmutableFields(ctx, d, optionName, optionTenant, optionTenantSpace); err != nil {
+		return nil, nil, err
+	}
 
-	var patches []ResourcePatch // []*hmrest.VolumePatch
+	volumeName := d.Get(optionName).(string)
+	tenantSpaceName := d.Get(optionTenantSpace).(string)
+	tenantName := d.Get(optionTenant).(string)
 
-	if d.HasChange("display_name") {
-		displayName := d.Get("display_name").(string)
+	var patches []ResourcePatch
+
+	if d.HasChange(optionDisplayName) {
+		displayName := rdStringDefault(ctx, d, optionDisplayName, volumeName)
 		tflog.Trace(ctx, "update",
 			"resource", "volume",
-			"parameter", "display_name",
+			"parameter", optionDisplayName,
 			"to", displayName,
 			"patch_idx", len(patches),
 		)
@@ -236,11 +285,11 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 		})
 	}
 
-	if d.HasChange("protection_policy_name") {
-		protectionPolicyName := d.Get("protection_policy_name").(string)
+	if d.HasChange(optionProtectionPolicy) {
+		protectionPolicyName := d.Get(optionProtectionPolicy).(string)
 		tflog.Trace(ctx, "update",
 			"resource", "volume",
-			"parameter", "protection_policy_name",
+			"parameter", optionProtectionPolicy,
 			"to", protectionPolicyName,
 			"patch_idx", len(patches),
 		)
@@ -251,11 +300,11 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 
 	// if there is a change to placement groups, then we need to remove the hosts and then re-add them
 	reAddHosts := false
-	if d.HasChange("placement_group_name") {
+	if d.HasChange(optionPlacementGroup) {
 		reAddHosts = true
 		tflog.Trace(ctx, "update",
 			"resource", "volume",
-			"parameter", "host_names",
+			"parameter", optionHostAccessPolicies,
 			"to", "",
 			"patch_idx", len(patches),
 			"message", "temporary removal of hosts for placement_groups_name change",
@@ -265,23 +314,23 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 		})
 	}
 
-	if d.HasChange("storage_class_name") || d.HasChange("placement_group_name") {
+	if d.HasChange(optionStorageClass) || d.HasChange(optionPlacementGroup) {
 		patch := &hmrest.VolumePatch{}
-		if d.HasChange("storage_class_name") {
-			storageClassName := d.Get("storage_class_name").(string)
+		if d.HasChange(optionStorageClass) {
+			storageClassName := d.Get(optionStorageClass).(string)
 			tflog.Trace(ctx, "update",
 				"resource", "volume",
-				"parameter", "storage_class_name",
+				"parameter", optionStorageClass,
 				"to", storageClassName,
 				"patch_idx", len(patches),
 			)
 			patch.StorageClass = &hmrest.NullableString{Value: storageClassName}
 		}
-		if d.HasChange("placement_group_name") {
-			placementGroupName := d.Get("placement_group_name").(string)
+		if d.HasChange(optionPlacementGroup) {
+			placementGroupName := d.Get(optionPlacementGroup).(string)
 			tflog.Trace(ctx, "update",
 				"resource", "volume",
-				"parameter", "placement_group_name",
+				"parameter", optionPlacementGroup,
 				"to", placementGroupName,
 				"patch_idx", len(patches),
 			)
@@ -290,17 +339,12 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 		patches = append(patches, patch)
 	}
 
-	if d.HasChange("host_names") || reAddHosts {
-		s := ""
-		for idx, item := range d.Get("host_names").(*schema.Set).List() {
-			if idx != 0 {
-				s += ","
-			}
-			s += item.(string)
-		}
+	if d.HasChange(optionHostAccessPolicies) || reAddHosts {
+		s := strings.Join(rdStringSet(ctx, d, optionHostAccessPolicies), ",")
+
 		tflog.Trace(ctx, "update",
 			"resource", "volume",
-			"parameter", "host_names",
+			"parameter", optionHostAccessPolicies,
 			"to", s,
 			"patch_idx", len(patches),
 			"readded", reAddHosts,
@@ -310,17 +354,18 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 		})
 	}
 
-	if d.HasChange("size") {
-		size := d.Get("size").(int)
+	if _, ok := d.GetOk(optionSize); ok && d.HasChange(optionSize) {
+		size, _ := utilities.ConvertDataUnitsToInt64(rdString(ctx, d, optionSize), 1024)
+
 		tflog.Trace(ctx, "update",
 			"resource", "volume",
-			"parameter", "size",
+			"parameter", optionSize,
 			"to", size,
 			"patch_idx", len(patches),
 		)
 
 		patches = append(patches, &hmrest.VolumePatch{
-			Size: &hmrest.NullableSize{Value: int64(size)},
+			Size: &hmrest.NullableSize{Value: size},
 		})
 	}
 
@@ -345,10 +390,10 @@ func (vp *volumeProvider) PrepareUpdate(ctx context.Context, client *hmrest.APIC
 }
 
 func (vp *volumeProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
-	volumeName := d.Get("name").(string)
-	tenantSpaceName := d.Get("tenant_space_name").(string)
-	tenantName := d.Get("tenant_name").(string)
-	eradicate := d.Get("eradicate_on_delete").(bool)
+	volumeName := d.Get(optionName).(string)
+	tenantSpaceName := d.Get(optionTenantSpace).(string)
+	tenantName := d.Get(optionTenant).(string)
+	eradicate := d.Get(optionEradicateOnDelete).(bool)
 
 	fn := func(ctx context.Context, client *hmrest.APIClient, body RequestSpec) (*hmrest.Operation, error) {
 		tflog.Trace(ctx, "removing host assignments before deleting volume")
@@ -402,6 +447,44 @@ func (vp *volumeProvider) PrepareDelete(ctx context.Context, client *hmrest.APIC
 	return fn, nil
 }
 
+func (vp *volumeProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	orderedRequiredGroupNames := []string{
+		resourceGroupNameTenant,
+		resourceGroupNameTenantSpace,
+		resourceGroupNameVolume,
+	}
+	// The ID is user provided value - we expect self link
+	parsedSelfLink, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid volume import path. Expected path in format '/tenants/<tenant>/tenant-spaces/<tenant-space>/volumes/<volume>'")
+	}
+
+	volume, _, err := client.VolumesApi.GetVolume(ctx, parsedSelfLink[resourceGroupNameTenant], parsedSelfLink[resourceGroupNameTenantSpace], parsedSelfLink[resourceGroupNameVolume], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = vp.loadVolume(volume, d)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ID to the real volume ID
+	d.SetId(volume.Id)
+
+	// Volume is not destroyed, no need to recover it
+	if !volume.Destroyed {
+		return []*schema.ResourceData{d}, nil
+	}
+
+	if err := vp.recoverVolume(ctx, volume, client, d); err != nil {
+		return nil, err
+	}
+
+	return []*schema.ResourceData{d}, nil
+}
+
 func (vp *volumeProvider) getSourceLink(ctx context.Context, d *schema.ResourceData) string {
 	tenant := rdString(ctx, d, getSourceLinkItem(optionTenant))
 	ts := rdString(ctx, d, getSourceLinkItem(optionTenantSpace))
@@ -419,6 +502,63 @@ func (vp *volumeProvider) getSourceLink(ctx context.Context, d *schema.ResourceD
 	return fmt.Sprintf(
 		"/tenants/%s/tenant-spaces/%s/snapshots/%s/volume-snapshots/%s", tenant, ts, snapshot, volumeSnapshot,
 	)
+}
+
+func (vp *volumeProvider) loadVolume(volume hmrest.Volume, d *schema.ResourceData) error {
+	hostNames := []string{}
+	for _, hap := range volume.HostAccessPolicies {
+		hostNames = append(hostNames, hap.Name)
+	}
+	err := getFirstError(
+		d.Set(optionHostAccessPolicies, hostNames),
+		d.Set(optionTenant, volume.Tenant.Name),
+		d.Set(optionTenantSpace, volume.TenantSpace.Name),
+		d.Set(optionStorageClass, volume.StorageClass.Name),
+		d.Set(optionPlacementGroup, volume.PlacementGroup.Name),
+		d.Set(optionName, volume.Name),
+		d.Set(optionDisplayName, volume.DisplayName),
+		d.Set(optionSize, strconv.FormatInt(volume.Size, 10)),
+		d.Set(optionSerialNumber, volume.SerialNumber),
+		d.Set(optionCreatedAt, volume.CreatedAt),
+		d.Set(optionProtectionPolicy, nil),
+		d.Set(optionTargetIscsiIqn, nil),
+		d.Set(optionTargetIscsiAddresses, nil),
+	)
+	if volume.ProtectionPolicy != nil {
+		err = getFirstError(err, d.Set(optionProtectionPolicy, volume.ProtectionPolicy.Name))
+	}
+
+	if volume.Target != nil && volume.Target.Iscsi != nil {
+		err = getFirstError(err,
+			d.Set(optionTargetIscsiIqn, volume.Target.Iscsi.Iqn),
+			d.Set(optionTargetIscsiAddresses, volume.Target.Iscsi.Addresses),
+		)
+	}
+	return err
+}
+
+func (vp *volumeProvider) recoverVolume(
+	ctx context.Context, volume hmrest.Volume, client *hmrest.APIClient, d *schema.ResourceData,
+) error {
+	body := hmrest.VolumePatch{Destroyed: &hmrest.NullableBoolean{Value: false}}
+	op, _, err := client.VolumesApi.UpdateVolume(ctx, body, volume.Tenant.Name, volume.TenantSpace.Name, volume.Name, nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return err
+	}
+
+	succeeded, err := utilities.WaitOnOperation(ctx, &op, client)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return err
+	}
+
+	if !succeeded {
+		tflog.Error(ctx, "REST recover failed", "error_message", op.Error_.Message, "PureCode", op.Error_.PureCode, "HttpCode", op.Error_.HttpCode)
+		return errors.New(op.Error_.Message)
+	}
+
+	return nil
 }
 
 func getSourceLinkItem(optionName string) string {

@@ -27,10 +27,11 @@ func dataSourceStorageService() *schema.Resource {
 			Elem: &schema.Resource{
 				Schema: schemaStorageService(),
 			},
+			Description: "List of matching Storage Services.",
 		},
 	}
 
-	storageServiceDataSourceFunctions := NewBaseDataSourceFunctions("StorageService", ds, dsSchema)
+	storageServiceDataSourceFunctions := NewBaseDataSourceFunctions(resourceKindStorageService, ds, dsSchema)
 
 	return storageServiceDataSourceFunctions.Resource
 }

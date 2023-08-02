@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -20,6 +21,8 @@ import (
 )
 
 func TestAccHostAccessPolicy_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("host_access_policy")
 	rName := "fusion_host_access_policy." + rNameConfig
 	displayName := acctest.RandomWithPrefix("host-access-policy-display-name")
@@ -47,6 +50,8 @@ func TestAccHostAccessPolicy_basic(t *testing.T) {
 }
 
 func TestAccHostAccessPolicy_RequiredAttributes(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	rNameConfig := acctest.RandomWithPrefix("host_access_policy")
 	displayName := acctest.RandomWithPrefix("host-access-policy-display-name")
 	hostAccessPolicyName := acctest.RandomWithPrefix("test_hap")
@@ -66,6 +71,53 @@ func TestAccHostAccessPolicy_RequiredAttributes(t *testing.T) {
 			{
 				Config:      testHostAccessPolicyConfig(rNameConfig, hostAccessPolicyName, displayName, iqn, ""),
 				ExpectError: regexp.MustCompile("Error: expected personality to be one of"),
+			},
+		},
+	})
+}
+
+func TestAccHostAccessPolicy_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	rNameConfig := acctest.RandomWithPrefix("host_access_policy")
+	rName := "fusion_host_access_policy." + rNameConfig
+	displayName := acctest.RandomWithPrefix("host-access-policy-display-name")
+	hostAccessPolicyName := acctest.RandomWithPrefix("test_hap")
+	iqn := randIQN()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckHAPDestroy,
+		Steps: []resource.TestStep{
+			// Create Host Access Policy and validate it's fields
+			{
+				Config: testHostAccessPolicyConfig(rNameConfig, hostAccessPolicyName, displayName, iqn, "linux"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(rName, "name", hostAccessPolicyName),
+					resource.TestCheckResourceAttr(rName, "display_name", displayName),
+					resource.TestCheckResourceAttr(rName, "iqn", iqn),
+					resource.TestCheckResourceAttr(rName, "personality", "linux"),
+					testHostAccessPolicyExists(rName),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_host_access_policy.%s", rNameConfig),
+				ImportStateId:     fmt.Sprintf("/host-access-policies/%s", hostAccessPolicyName),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_host_access_policy.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/host-access-policies/wrong-%s", hostAccessPolicyName),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_host_access_policy.%s", rNameConfig),
+				ImportStateId: fmt.Sprintf("/wrong-%s", hostAccessPolicyName),
+				ExpectError:   regexp.MustCompile("invalid host_access_policy import path. Expected path in format '/host-access-policies/<host-access-policy>'"),
 			},
 		},
 	})
@@ -93,9 +145,9 @@ func testHostAccessPolicyExists(rName string) resource.TestCheckFunc {
 		}
 		attrs := tfHostAccessPolicy.Primary.Attributes
 
-		goclientHostAccessPolicy, _, err := testAccProvider.Meta().(*hmrest.APIClient).HostAccessPoliciesApi.GetHostAccessPolicy(context.Background(), attrs["name"], nil)
+		goclientHostAccessPolicy, _, err := testAccProvider.Meta().(*hmrest.APIClient).HostAccessPoliciesApi.GetHostAccessPolicyById(context.Background(), attrs["id"], nil)
 		if err != nil {
-			return fmt.Errorf("Go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return fmt.Errorf("Go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
 		}
 		if strings.Compare(goclientHostAccessPolicy.Name, attrs["name"]) != 0 ||
 			strings.Compare(goclientHostAccessPolicy.DisplayName, attrs["display_name"]) != 0 ||

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/utilities"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -22,22 +23,37 @@ import (
 	hmrest "github.com/PureStorage-OpenConnect/terraform-provider-fusion/internal/hmrest"
 )
 
+type storageEndpointTestConfig struct {
+	RName, Name, DisplayName,
+	Region, AZ string
+}
+
+func generateStorageEndpointTestConfigAndCommonTFConfig() (storageEndpointTestConfig, string) {
+	cfg := storageEndpointTestConfig{
+		Name:        acctest.RandomWithPrefix("se-test-name"),
+		DisplayName: acctest.RandomWithPrefix("se-test-display-name"),
+		Region:      acctest.RandomWithPrefix("se-test-region"),
+		AZ:          acctest.RandomWithPrefix("se-test-az"),
+	}
+	cfg.RName = "fusion_storage_endpoint." + cfg.Name
+
+	commonTFConfig := testRegionConfigNoDisplayName(cfg.Region, cfg.Region) +
+		testAvailabilityZoneConfigRef(cfg.AZ, cfg.AZ, cfg.Region)
+
+	return cfg, commonTFConfig
+}
+
 // Creates and destroys
 func TestAccStorageEndpoint_basic(t *testing.T) {
-	rNameConfig := acctest.RandomWithPrefix("storage_endpoint_test")
-	rName := "fusion_storage_endpoint." + rNameConfig
-	displayName := acctest.RandomWithPrefix("se-display-name")
-	storageEndpointName := acctest.RandomWithPrefix("test_se")
+	utilities.CheckTestSkip(t)
+
+	cfg1, tfConfig1 := generateStorageEndpointTestConfigAndCommonTFConfig()
+	cfg2, tfConfig2 := generateStorageEndpointTestConfigAndCommonTFConfig()
 
 	nigName := acctest.RandomWithPrefix("nig_se_test")
-	regionName := acctest.RandomWithPrefix("region_se_test")
-	azName := acctest.RandomWithPrefix("se_az")
+	nigsConfig := testNetworkInterfaceGroupConfigRef(nigName, nigName, cfg1.AZ, cfg1.Region, "10.21.200.1", "10.21.200.0/24")
 
-	regionConfig := testRegionConfigNoDisplayName(regionName, regionName)
-	azConfig := testAvailabilityZoneConfigRef(azName, azName, regionName)
-	nigsConfig := testNetworkInterfaceGroupConfigRef(nigName, nigName, azName, regionName, "10.21.200.1", "10.21.200.0/24")
-
-	iscsi := []map[string]interface{}{
+	discoveryInterfaces := []map[string]interface{}{
 		{
 			"address": "10.21.200.121/24",
 		},
@@ -56,23 +72,40 @@ func TestAccStorageEndpoint_basic(t *testing.T) {
 		},
 	}
 
-	commonConfig := regionConfig + azConfig + nigsConfig
+	iscsi := []map[string]interface{}{{
+		"discovery_interfaces": discoveryInterfaces,
+	}}
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProvidersFactory,
 		CheckDestroy:      testCheckStorageEndpointDestroy,
 		Steps: []resource.TestStep{
-			// Create Storage Endpoint and validate it's fields
+			// Create Storage Endpoint with Iscsi and validate it's fields
 			{
-				Config: commonConfig + testStorageEndpointConfig(rNameConfig, storageEndpointName, displayName, regionName, azName, iscsi),
+				Config: tfConfig1 + nigsConfig + testStorageEndpointConfig(cfg1.Name, cfg1.Name, cfg1.DisplayName, cfg1.Region, cfg1.AZ, iscsi),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(rName, "name", storageEndpointName),
-					resource.TestCheckResourceAttr(rName, "display_name", displayName),
-					resource.TestCheckResourceAttr(rName, "region", regionName),
-					resource.TestCheckResourceAttr(rName, "availability_zone", azName),
-					testCheckStorageEndpointIscsi(rName, iscsi),
-					testStorageEndpointExists(rName, iscsi),
+					resource.TestCheckResourceAttr(cfg1.RName, "name", cfg1.Name),
+					resource.TestCheckResourceAttr(cfg1.RName, "display_name", cfg1.DisplayName),
+					resource.TestCheckResourceAttr(cfg1.RName, "region", cfg1.Region),
+					resource.TestCheckResourceAttr(cfg1.RName, "availability_zone", cfg1.AZ),
+					testCheckStorageEndpointIscsiDiscoveryInterfaces(cfg1.RName, discoveryInterfaces),
+					testStorageEndpointExistsIscsi(cfg1.RName, iscsi),
+				),
+			},
+			// Create Storage Endpoint with Cbs Azure Iscsi and validate it's fields
+			{
+				Config: tfConfig2 + testStorageEndpointConfigWithCbsAzureIscsi(cfg2.Name, cfg2.Name, cfg2.DisplayName, cfg2.Region, cfg2.AZ, "identity", "lb-id", `["127.0.0.1","127.0.0.2"]`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(cfg2.RName, "name", cfg2.Name),
+					resource.TestCheckResourceAttr(cfg2.RName, "display_name", cfg2.DisplayName),
+					resource.TestCheckResourceAttr(cfg2.RName, "region", cfg2.Region),
+					resource.TestCheckResourceAttr(cfg2.RName, "availability_zone", cfg2.AZ),
+					resource.TestCheckResourceAttr(cfg2.RName, "cbs_azure_iscsi.0.storage_endpoint_collection_identity", "identity"),
+					resource.TestCheckResourceAttr(cfg2.RName, "cbs_azure_iscsi.0.load_balancer", "lb-id"),
+					resource.TestCheckResourceAttr(cfg2.RName, "cbs_azure_iscsi.0.load_balancer_addresses.0", "127.0.0.1"),
+					resource.TestCheckResourceAttr(cfg2.RName, "cbs_azure_iscsi.0.load_balancer_addresses.1", "127.0.0.2"),
+					testStorageEndpointExistsCbsAzureIscsi(cfg2.RName),
 				),
 			},
 		},
@@ -80,24 +113,18 @@ func TestAccStorageEndpoint_basic(t *testing.T) {
 }
 
 func TestAccStorageEndpoint_update(t *testing.T) {
-	rNameConfig := acctest.RandomWithPrefix("storage_endpoint_test")
-	rName := "fusion_storage_endpoint." + rNameConfig
-	displayName := acctest.RandomWithPrefix("se-display-name")
-	storageEndpointName := acctest.RandomWithPrefix("test_se")
+	utilities.CheckTestSkip(t)
 
-	regionName := acctest.RandomWithPrefix("region_se_test")
-	azName := acctest.RandomWithPrefix("se_az")
-
-	regionConfig := testRegionConfigNoDisplayName(regionName, regionName)
-	azConfig := testAvailabilityZoneConfigRef(azName, azName, regionName)
-
-	iscsi := []map[string]interface{}{
+	cfg, tfConfig := generateStorageEndpointTestConfigAndCommonTFConfig()
+	discoveryInterfaces := []map[string]interface{}{
 		{
 			"address": "10.21.200.121/24",
 		},
 	}
 
-	commonConfig := regionConfig + azConfig
+	iscsi := []map[string]interface{}{{
+		"discovery_interfaces": discoveryInterfaces,
+	}}
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -106,31 +133,31 @@ func TestAccStorageEndpoint_update(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create Storage Endpoint and validate it's fields
 			{
-				Config: commonConfig + testStorageEndpointConfigNoDisplayName(rNameConfig, storageEndpointName, regionName, azName, iscsi),
+				Config: tfConfig + testStorageEndpointConfigNoDisplayName(cfg.Name, cfg.Name, cfg.Region, cfg.AZ, iscsi),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(rName, "name", storageEndpointName),
-					resource.TestCheckResourceAttr(rName, "display_name", storageEndpointName),
-					resource.TestCheckResourceAttr(rName, "region", regionName),
-					resource.TestCheckResourceAttr(rName, "availability_zone", azName),
-					testCheckStorageEndpointIscsi(rName, iscsi),
-					testStorageEndpointExists(rName, iscsi),
+					resource.TestCheckResourceAttr(cfg.RName, "name", cfg.Name),
+					resource.TestCheckResourceAttr(cfg.RName, "display_name", cfg.Name),
+					resource.TestCheckResourceAttr(cfg.RName, "region", cfg.Region),
+					resource.TestCheckResourceAttr(cfg.RName, "availability_zone", cfg.AZ),
+					testCheckStorageEndpointIscsiDiscoveryInterfaces(cfg.RName, discoveryInterfaces),
+					testStorageEndpointExistsIscsi(cfg.RName, iscsi),
 				),
 			},
 			// Update display name
 			{
-				Config: commonConfig + testStorageEndpointConfig(rNameConfig, storageEndpointName, displayName, regionName, azName, iscsi),
+				Config: tfConfig + testStorageEndpointConfig(cfg.Name, cfg.Name, cfg.DisplayName, cfg.Region, cfg.AZ, iscsi),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(rName, "name", storageEndpointName),
-					resource.TestCheckResourceAttr(rName, "display_name", displayName),
-					resource.TestCheckResourceAttr(rName, "region", regionName),
-					resource.TestCheckResourceAttr(rName, "availability_zone", azName),
-					testCheckStorageEndpointIscsi(rName, iscsi),
-					testStorageEndpointExists(rName, iscsi),
+					resource.TestCheckResourceAttr(cfg.RName, "name", cfg.Name),
+					resource.TestCheckResourceAttr(cfg.RName, "display_name", cfg.DisplayName),
+					resource.TestCheckResourceAttr(cfg.RName, "region", cfg.Region),
+					resource.TestCheckResourceAttr(cfg.RName, "availability_zone", cfg.AZ),
+					testCheckStorageEndpointIscsiDiscoveryInterfaces(cfg.RName, discoveryInterfaces),
+					testStorageEndpointExistsIscsi(cfg.RName, iscsi),
 				),
 			},
 			// Can't update immutable fields
 			{
-				Config:      commonConfig + testStorageEndpointConfig(rNameConfig, "immutable", displayName, regionName, azName, iscsi),
+				Config:      tfConfig + testStorageEndpointConfig(cfg.Name, "immutable", cfg.DisplayName, cfg.Region, cfg.AZ, iscsi),
 				ExpectError: regexp.MustCompile("attempting to update an immutable field"),
 			},
 		},
@@ -138,41 +165,33 @@ func TestAccStorageEndpoint_update(t *testing.T) {
 }
 
 func TestAccStorageEndpoint_multiple(t *testing.T) {
-	rNameConfig := acctest.RandomWithPrefix("storage_endpoint_test")
-	rName := "fusion_storage_endpoint." + rNameConfig
-	storageEndpointName := acctest.RandomWithPrefix("test_se")
+	utilities.CheckTestSkip(t)
 
-	rNameConfig2 := acctest.RandomWithPrefix("storage_endpoint_test")
-	rName2 := "fusion_storage_endpoint." + rNameConfig2
-	storageEndpointName2 := acctest.RandomWithPrefix("test_se")
-
-	displayName := acctest.RandomWithPrefix("se-display-name")
-
-	regionName := acctest.RandomWithPrefix("region_se_test")
-	azName := acctest.RandomWithPrefix("se_az")
-	azName2 := acctest.RandomWithPrefix("se_az")
-
-	regionConfig := testRegionConfigNoDisplayName(regionName, regionName)
-	azConfig := testAvailabilityZoneConfigRef(azName, azName, regionName)
-	azConfig2 := testAvailabilityZoneConfigRef(azName2, azName2, regionName)
-
+	cfg1, tfConfig1 := generateStorageEndpointTestConfigAndCommonTFConfig()
 	iscsi := []map[string]interface{}{
 		{
-			"address": "10.21.200.121/24",
+			"discovery_interfaces": []map[string]interface{}{
+				{"address": "10.21.200.121/24"},
+			},
 		},
 	}
 
+	cfg2, tfConfig2 := generateStorageEndpointTestConfigAndCommonTFConfig()
 	iscsi2 := []map[string]interface{}{
 		{
-			"address": "10.21.200.122/24",
-			"gateway": "10.21.200.1",
+			"discovery_interfaces": []map[string]interface{}{
+				{
+					"address": "10.21.200.122/24",
+					"gateway": "10.21.200.1",
+				},
+			},
 		},
 	}
 
-	commonConfig := regionConfig + azConfig + azConfig2
-	seConfig := testStorageEndpointConfig(rNameConfig, storageEndpointName, displayName, regionName, azName, iscsi)
-	seConfig2 := testStorageEndpointConfig(rNameConfig2, storageEndpointName2, displayName, regionName, azName2, iscsi2)
-	seConfig3 := testStorageEndpointConfig("conflictR", storageEndpointName, displayName, regionName, azName, iscsi2)
+	commonConfig := tfConfig1 + tfConfig2
+	seConfig := testStorageEndpointConfig(cfg1.Name, cfg1.Name, cfg1.DisplayName, cfg1.Region, cfg1.AZ, iscsi)
+	seConfig2 := testStorageEndpointConfig(cfg2.Name, cfg2.Name, cfg2.DisplayName, cfg2.Region, cfg2.AZ, iscsi2)
+	seConfig3 := testStorageEndpointConfig("conflictR", cfg1.Name, cfg1.DisplayName, cfg1.Region, cfg1.AZ, iscsi2)
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -183,8 +202,8 @@ func TestAccStorageEndpoint_multiple(t *testing.T) {
 			{
 				Config: commonConfig + seConfig + seConfig2,
 				Check: resource.ComposeTestCheckFunc(
-					testStorageEndpointExists(rName, iscsi),
-					testStorageEndpointExists(rName2, iscsi2),
+					testStorageEndpointExistsIscsi(cfg1.RName, iscsi),
+					testStorageEndpointExistsIscsi(cfg2.RName, iscsi2),
 				),
 			},
 			// Cannot create the same SE twice
@@ -196,37 +215,136 @@ func TestAccStorageEndpoint_multiple(t *testing.T) {
 	})
 }
 
-func testStorageEndpointExists(rName string, iscsi []map[string]interface{}) resource.TestCheckFunc {
+func TestAccStorageEndpoint_import(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
+	cfg, tfConfig := generateStorageEndpointTestConfigAndCommonTFConfig()
+
+	nigName := acctest.RandomWithPrefix("nig_se_test")
+	nigsConfig := testNetworkInterfaceGroupConfigRef(nigName, nigName, cfg.AZ, cfg.Region, "10.21.200.1", "10.21.200.0/24")
+
+	discoveryInterfaces := []map[string]interface{}{
+		{
+			"address": "10.21.200.121/24",
+		},
+		{
+			"address": "10.21.200.122/24",
+			"gateway": "10.21.200.1",
+		},
+		{
+			"address":                  "10.21.200.123/24",
+			"network_interface_groups": []interface{}{nigName},
+		},
+		{
+			"address":                  "10.21.200.124/24",
+			"gateway":                  "10.21.200.1",
+			"network_interface_groups": []interface{}{nigName},
+		},
+	}
+
+	iscsi := []map[string]interface{}{{
+		"discovery_interfaces": discoveryInterfaces,
+	}}
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProvidersFactory,
+		CheckDestroy:      testCheckStorageEndpointDestroy,
+		Steps: []resource.TestStep{
+			// Create Storage Endpoint with Iscsi and validate it's fields
+			{
+				Config: tfConfig + nigsConfig + testStorageEndpointConfig(cfg.Name, cfg.Name, cfg.DisplayName, cfg.Region, cfg.AZ, iscsi),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(cfg.RName, "name", cfg.Name),
+					resource.TestCheckResourceAttr(cfg.RName, "display_name", cfg.DisplayName),
+					resource.TestCheckResourceAttr(cfg.RName, "region", cfg.Region),
+					resource.TestCheckResourceAttr(cfg.RName, "availability_zone", cfg.AZ),
+					testStorageEndpointExistsIscsi(cfg.RName, iscsi),
+				),
+			},
+			{
+				ImportState:       true,
+				ResourceName:      fmt.Sprintf("fusion_storage_endpoint.%s", cfg.Name),
+				ImportStateId:     fmt.Sprintf("/regions/%[1]s/availability-zones/%[2]s/storage-endpoints/%[3]s", cfg.Region, cfg.AZ, cfg.Name),
+				ImportStateVerify: true,
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_endpoint.%s", cfg.Name),
+				ImportStateId: fmt.Sprintf("/regions/%[1]s/availability-zones/%[2]s/storage-endpoints/wrong-%[3]s", cfg.Region, cfg.AZ, cfg.Name),
+				ExpectError:   regexp.MustCompile("Not Found"),
+			},
+			{
+				ImportState:   true,
+				ResourceName:  fmt.Sprintf("fusion_storage_endpoint.%s", cfg.Name),
+				ImportStateId: fmt.Sprintf("/storage-endpoints/%[3]s", cfg.Region, cfg.AZ, cfg.Name),
+				ExpectError:   regexp.MustCompile("invalid storage_endpoint import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>/storage-endpoints/<storage-endpoint>'"),
+			},
+		},
+	})
+}
+
+func testStorageEndpointExistsIscsi(rName string, iscsi []map[string]interface{}) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		tfStorageEndpoint, ok := s.RootModule().Resources[rName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", rName)
-		}
-
-		if tfStorageEndpoint.Type != "fusion_storage_endpoint" {
-			return fmt.Errorf("expected type: fusion_storage_endpoint. Found: %s", tfStorageEndpoint.Type)
-		}
-
-		attrs := tfStorageEndpoint.Primary.Attributes
-		goclientStorageEndpoint, _, err := testAccProvider.Meta().(*hmrest.APIClient).StorageEndpointsApi.GetStorageEndpoint(
-			context.Background(),
-			attrs["region"],
-			attrs["availability_zone"],
-			attrs["name"],
-			nil,
-		)
-
+		tfResource, actualSe, err := testStorageEndpointExistsBase(s, rName)
 		if err != nil {
-			return fmt.Errorf("go client returned error while searching for %s. Error: %s", attrs["name"], err)
+			return err
 		}
 
-		if strings.Compare(goclientStorageEndpoint.Name, attrs["name"]) != 0 ||
-			strings.Compare(goclientStorageEndpoint.DisplayName, attrs["display_name"]) != 0 ||
-			!testStorageEndpointMatchIscsi(iscsi, goclientStorageEndpoint.Iscsi.DiscoveryInterfaces) {
+		attrs := tfResource.Primary.Attributes
+
+		if strings.Compare(actualSe.Name, attrs["name"]) != 0 ||
+			strings.Compare(actualSe.DisplayName, attrs["display_name"]) != 0 ||
+			!testStorageEndpointMatchDiscoveryInterfaces(iscsi[0]["discovery_interfaces"].([]map[string]interface{}), actualSe.Iscsi.DiscoveryInterfaces) {
 			return fmt.Errorf("terraform storage endpoint doesn't match goclients storage endpoint")
 		}
 		return nil
 	}
+}
+
+func testStorageEndpointExistsCbsAzureIscsi(rName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		tfResource, actualSe, err := testStorageEndpointExistsBase(s, rName)
+		if err != nil {
+			return err
+		}
+
+		attrs := tfResource.Primary.Attributes
+
+		if strings.Compare(actualSe.Name, attrs["name"]) != 0 ||
+			strings.Compare(actualSe.DisplayName, attrs["display_name"]) != 0 ||
+			strings.Compare(actualSe.CbsAzureIscsi.LoadBalancer, attrs["cbs_azure_iscsi.0.load_balancer"]) != 0 ||
+			strings.Compare(actualSe.CbsAzureIscsi.StorageEndpointCollectionIdentity, attrs["cbs_azure_iscsi.0.storage_endpoint_collection_identity"]) != 0 {
+			return fmt.Errorf("terraform storage endpoint doesn't match goclients storage endpoint")
+		}
+		return nil
+	}
+}
+
+func testStorageEndpointExistsBase(s *terraform.State, rName string) (*terraform.ResourceState, hmrest.StorageEndpoint, error) {
+	tfResource, ok := s.RootModule().Resources[rName]
+	if !ok {
+		return nil, hmrest.StorageEndpoint{}, fmt.Errorf("resource not found: %s", rName)
+	}
+
+	if tfResource.Type != "fusion_storage_endpoint" {
+		return nil, hmrest.StorageEndpoint{}, fmt.Errorf("expected type: fusion_storage_endpoint. Found: %s", tfResource.Type)
+	}
+
+	attrs := tfResource.Primary.Attributes
+	actualSe, _, err := testAccProvider.Meta().(*hmrest.APIClient).StorageEndpointsApi.GetStorageEndpointById(
+		context.Background(),
+		attrs["id"],
+		nil,
+	)
+
+	if err != nil {
+		return nil,
+			hmrest.StorageEndpoint{},
+			fmt.Errorf("go client returned error while searching for %s by id: %s. Error: %s", attrs["name"], attrs["id"], err)
+	}
+
+	return tfResource, actualSe, nil
 }
 
 func testCheckStorageEndpointDestroy(s *terraform.State) error {
@@ -258,17 +376,17 @@ func testCheckStorageEndpointDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testStorageEndpointIscsiConfig(iscsiList []map[string]interface{}) string {
-	iscsiStrings := make([]string, 0)
+func testStorageEndpointDiscoveryInterfacesConfig(discIntsList []map[string]interface{}) string {
+	discIntsStrings := make([]string, 0)
 
-	for _, iscsi := range iscsiList {
+	for _, discInt := range discIntsList {
 		gatewayField := ""
-		if gateway, ok := iscsi["gateway"]; ok {
+		if gateway, ok := discInt["gateway"]; ok {
 			gatewayField = fmt.Sprintf("gateway = \"%s\"", gateway)
 		}
 
 		nigsField := ""
-		if nigList, ok := iscsi["network_interface_groups"]; ok {
+		if nigList, ok := discInt["network_interface_groups"]; ok {
 			nigs := make([]string, 0)
 
 			for _, nig := range nigList.([]interface{}) {
@@ -278,22 +396,55 @@ func testStorageEndpointIscsiConfig(iscsiList []map[string]interface{}) string {
 			nigsField = fmt.Sprintf("network_interface_groups = [%s]", strings.Join(nigs, ","))
 		}
 
-		iscsiString := fmt.Sprintf(`
-		iscsi {
+		discIntsString := fmt.Sprintf(`
+		discovery_interfaces {
 			address = "%[1]s"
 			%[2]s
 			%[3]s
 		}
-		`, iscsi["address"], gatewayField, nigsField)
+		`, discInt["address"], gatewayField, nigsField)
 
-		iscsiStrings = append(iscsiStrings, iscsiString)
+		discIntsStrings = append(discIntsStrings, discIntsString)
 	}
 
-	return strings.Join(iscsiStrings, "")
+	return strings.Join(discIntsStrings, "")
 }
 
 func testStorageEndpointConfig(
 	rName, storageEndpointName, displayName, region, availabilityZone string, iscsi []map[string]interface{},
+) string {
+	discoveryInterfaces := iscsi[0]["discovery_interfaces"].([]map[string]interface{})
+	return fmt.Sprintf(`
+	resource "fusion_storage_endpoint" "%[1]s" {
+		name				= "%[2]s"
+		display_name		= "%[3]s"
+		region				= fusion_region.%[4]s.name
+		availability_zone	= fusion_availability_zone.%[5]s.name
+                iscsi {
+		        %[6]s
+                }
+	}
+	`, rName, storageEndpointName, displayName, region, availabilityZone, testStorageEndpointDiscoveryInterfacesConfig(discoveryInterfaces))
+}
+
+func testStorageEndpointConfigNoDisplayName(
+	rName, storageEndpointName, region, availabilityZone string, iscsi []map[string]interface{},
+) string {
+	discoveryInterfaces := iscsi[0]["discovery_interfaces"].([]map[string]interface{})
+	return fmt.Sprintf(`
+	resource "fusion_storage_endpoint" "%[1]s" {
+		name				= "%[2]s"
+		region				= fusion_region.%[3]s.name
+		availability_zone	= fusion_availability_zone.%[4]s.name
+                iscsi {
+		        %[5]s
+                }
+	}
+	`, rName, storageEndpointName, region, availabilityZone, testStorageEndpointDiscoveryInterfacesConfig(discoveryInterfaces))
+}
+
+func testStorageEndpointConfigWithCbsAzureIscsi(
+	rName, storageEndpointName, displayName, region, availabilityZone, collectionIdentity, loadBalancer, loadBalancerAddresses string,
 ) string {
 	return fmt.Sprintf(`
 	resource "fusion_storage_endpoint" "%[1]s" {
@@ -301,64 +452,55 @@ func testStorageEndpointConfig(
 		display_name		= "%[3]s"
 		region				= fusion_region.%[4]s.name
 		availability_zone	= fusion_availability_zone.%[5]s.name
-		%[6]s
+		cbs_azure_iscsi {
+			storage_endpoint_collection_identity = "%[6]s"
+			load_balancer                        = "%[7]s"
+			load_balancer_addresses              = %[8]s
+		}
 	}
-	`, rName, storageEndpointName, displayName, region, availabilityZone, testStorageEndpointIscsiConfig(iscsi))
+	`, rName, storageEndpointName, displayName, region, availabilityZone, collectionIdentity, loadBalancer, loadBalancerAddresses)
 }
 
-func testStorageEndpointConfigNoDisplayName(
-	rName, storageEndpointName, region, availabilityZone string, iscsi []map[string]interface{},
-) string {
-	return fmt.Sprintf(`
-	resource "fusion_storage_endpoint" "%[1]s" {
-		name				= "%[2]s"
-		region				= fusion_region.%[3]s.name
-		availability_zone	= fusion_availability_zone.%[4]s.name
-		%[5]s
-	}
-	`, rName, storageEndpointName, region, availabilityZone, testStorageEndpointIscsiConfig(iscsi))
-}
-
-func testCheckStorageEndpointIscsi(resourceName string, iscsis []map[string]interface{}) resource.TestCheckFunc {
+func testCheckStorageEndpointIscsiDiscoveryInterfaces(resourceName string, discoveryInterfaces []map[string]interface{}) resource.TestCheckFunc {
 	// Test length
 	testChecks := []resource.TestCheckFunc{
-		resource.TestCheckResourceAttr(resourceName, "iscsi.#", strconv.Itoa(len(iscsis))),
+		resource.TestCheckResourceAttr(resourceName, "iscsi.0.discovery_interfaces.#", strconv.Itoa(len(discoveryInterfaces))),
 	}
 
-	// Checks that correct iscsi blocks are present (ignores nig)
-	for _, iscsi := range iscsis {
-		iscsiCompareMap := make(map[string]string)
+	// Checks that correct discovery interface blocks are present (ignores nig)
+	for _, discoveryInterface := range discoveryInterfaces {
+		discoveryInterfaceCompareMap := make(map[string]string)
 
-		for key, value := range iscsi {
+		for key, value := range discoveryInterface {
 			if strValue, ok := value.(string); ok {
-				iscsiCompareMap[key] = strValue
+				discoveryInterfaceCompareMap[key] = strValue
 			}
 		}
 
-		testChecks = append(testChecks, resource.TestCheckTypeSetElemNestedAttrs(resourceName, "iscsi.*", iscsiCompareMap))
+		testChecks = append(testChecks, resource.TestCheckTypeSetElemNestedAttrs(resourceName, "iscsi.0.discovery_interfaces.*", discoveryInterfaceCompareMap))
 	}
 
 	return resource.ComposeAggregateTestCheckFunc(testChecks...)
 }
 
-func testStorageEndpointMatchIscsi(expectedIscsis []map[string]interface{}, iscsis []hmrest.StorageEndpointIscsiDiscoveryInterface) bool {
-	if len(expectedIscsis) != len(iscsis) {
+func testStorageEndpointMatchDiscoveryInterfaces(expectedDiscInts []map[string]interface{}, discInts []hmrest.StorageEndpointIscsiDiscoveryInterface) bool {
+	if len(expectedDiscInts) != len(discInts) {
 		return false
 	}
 
-	for _, expectedIscsi := range expectedIscsis {
+	for _, expectedDiscInt := range expectedDiscInts {
 		found := false
 
-		for _, iscsi := range iscsis {
-			if iscsi.Address != expectedIscsi["address"] {
+		for _, iscsi := range discInts {
+			if iscsi.Address != expectedDiscInt["address"] {
 				continue
 			}
 
-			if v, ok := expectedIscsi["gateway"]; ok && v != iscsi.Gateway {
+			if v, ok := expectedDiscInt["gateway"]; ok && v != iscsi.Gateway {
 				continue
 			}
 
-			if v, ok := expectedIscsi["network_interface_groups"]; ok {
+			if v, ok := expectedDiscInt["network_interface_groups"]; ok {
 				names := make([]interface{}, 0)
 				for _, nig := range iscsi.NetworkInterfaceGroups {
 					names = append(names, nig.Name)

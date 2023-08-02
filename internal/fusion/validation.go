@@ -52,19 +52,27 @@ func IsValidAddress(v interface{}, path cty.Path) diag.Diagnostics {
 	return diags
 }
 
-func IsValidPrefix(v interface{}, path cty.Path) diag.Diagnostics {
+func IsValidCidr(v interface{}, path cty.Path) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	value := v.(string)
-	if !utilities.IsValidPrefix(value) {
+	if !utilities.IsValidCidr(value) {
 		diags = append(diags, diag.Diagnostic{
 			Severity: diag.Error,
-			Summary:  "Bad prefix",
+			Summary:  "Bad CIDR",
 			Detail:   "Prefix should be between 8 and 32",
 		})
 	}
 
 	return diags
+}
+
+func IsValidOptionalCidr(v interface{}, path cty.Path) diag.Diagnostics {
+	value := v.(string)
+	if value == "" {
+		return diag.Diagnostics{}
+	}
+	return IsValidCidr(v, path)
 }
 
 func DiffSuppressForHumanReadableTimePeriod(k, old, new string, d *schema.ResourceData) bool {

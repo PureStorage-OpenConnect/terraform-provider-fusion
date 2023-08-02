@@ -18,11 +18,15 @@ import (
 
 // Contains correct list of Tenant Spaces
 func TestAccTenantSpaceDataSource_basic(t *testing.T) {
+	utilities.CheckTestSkip(t)
+
 	dsNameConfig := acctest.RandomWithPrefix("tenant_space_ds_test")
 	count := 3
 	tenantSpaces := make([]map[string]interface{}, count)
 	configs := make([]string, count)
-	tenantName := testAccTenant
+
+	tenantName := acctest.RandomWithPrefix("tenant-test")
+	tenatConfig := testTenantConfig(tenantName, tenantName, tenantName)
 
 	for i := 0; i < count; i++ {
 		configName := acctest.RandomWithPrefix("tenant_space_test")
@@ -35,11 +39,11 @@ func TestAccTenantSpaceDataSource_basic(t *testing.T) {
 			"tenant":       tenantName,
 		}
 
-		configs[i] = testTenantSpaceConfigWithNames(configName, displayName, tenantSpaceName, tenantName)
+		configs[i] = testTenantSpaceConfigWithRefs(configName, displayName, tenantSpaceName, tenantName)
 	}
 
-	allConfigs := strings.Join(configs, "\n")
-	partialConfig := configs[0] + configs[1]
+	allConfigs := tenatConfig + strings.Join(configs, "\n")
+	partialConfig := tenatConfig + configs[0] + configs[1]
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -53,12 +57,15 @@ func TestAccTenantSpaceDataSource_basic(t *testing.T) {
 			// Check if they are contained in the data source
 			{
 				Config: allConfigs + "\n" + testTenantSpaceDataSourceConfig(dsNameConfig, tenantName),
-				Check:  utilities.TestCheckDataSource("fusion_tenant_space", dsNameConfig, "items", tenantSpaces),
+				Check:  utilities.TestCheckDataSourceExact("fusion_tenant_space", dsNameConfig, "items", tenantSpaces),
+			},
+			{
+				Config: partialConfig,
 			},
 			// Remove one tenant space. Check if only two of them are contained in the data source
 			{
 				Config: partialConfig + "\n" + testTenantSpaceDataSourceConfig(dsNameConfig, tenantName),
-				Check: utilities.TestCheckDataSource(
+				Check: utilities.TestCheckDataSourceExact(
 					"fusion_tenant_space", dsNameConfig, "items", []map[string]interface{}{tenantSpaces[0], tenantSpaces[1]},
 				),
 			},
@@ -68,6 +75,6 @@ func TestAccTenantSpaceDataSource_basic(t *testing.T) {
 
 func testTenantSpaceDataSourceConfig(dsName, tenantName string) string {
 	return fmt.Sprintf(`data "fusion_tenant_space" "%[1]s" {
-		tenant = "%[2]s"
+		tenant = fusion_tenant.%[2]s.name
 	}`, dsName, tenantName)
 }

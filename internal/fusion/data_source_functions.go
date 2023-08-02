@@ -27,10 +27,16 @@ type BaseDataSourceFunctions struct {
 	DataSource     DataSource
 }
 
+func genericDataSourceDescription(dataSourceName string) string {
+	return "Provides details about any `" + dataSourceName + "` matching the given parameters. For more info about the `" +
+		dataSourceName + "` type, see its documentation."
+}
+
 func NewBaseDataSourceFunctions(resourceKind string, dataSource DataSource, dsSchema map[string]*schema.Schema) *BaseDataSourceFunctions {
 	result := &BaseDataSourceFunctions{&schema.Resource{}, resourceKind, dataSource}
 	result.Resource.ReadContext = result.dataSourceRead
 	result.Resource.Schema = dsSchema
+	result.Resource.Description = genericDataSourceDescription(resourceKind)
 	return result
 }
 

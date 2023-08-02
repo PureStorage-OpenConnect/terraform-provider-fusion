@@ -31,35 +31,35 @@ func schemaNetworkInterfaceGroup() map[string]*schema.Schema {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the network interface group.",
+			Description:  "The name of the Network Interface Group.",
 		},
 		optionDisplayName: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Computed:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The human name of the network interface group. If not provided, defaults to I(name).",
+			Description:  "The human-readable name of the Network Interface Group. If not provided, defaults to I(name).",
 		},
 		optionAvailabilityZone: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "The name of the availability zone for the network interface group.",
+			Description:  "The name of the Availability Zone for the Network Interface Group.",
 		},
 		optionRegion: {
 			Type:         schema.TypeString,
 			Required:     true,
 			ValidateFunc: validation.StringIsNotEmpty,
-			Description:  "Region for the network interface group.",
+			Description:  "The name of Region for the Network Interface Group.",
 		},
 		optionGroupType: {
 			Type:         schema.TypeString,
 			Optional:     true,
 			Default:      networkInterfaceGroupGroupTypeETH,
 			ValidateFunc: validation.StringInSlice([]string{networkInterfaceGroupGroupTypeETH}, false),
-			Description:  "The type of network interface group.",
+			Description:  "The type of Network Interface Group.",
 		},
-		optionGroupTypeEth: {
+		optionEth: {
 			Type:     schema.TypeList,
 			Required: true,
 			MaxItems: 1,
@@ -69,19 +69,24 @@ func schemaNetworkInterfaceGroup() map[string]*schema.Schema {
 						Type:             schema.TypeString,
 						Required:         true,
 						ValidateDiagFunc: IsValidAddress,
-						Description:      "Address of the subnet gateway. Currently must be a valid IPv4 address.",
+						Description:      "The address of the subnet gateway. Currently must be a valid IPv4 address.",
 					},
 					optionPrefix: {
 						Type:             schema.TypeString,
 						Required:         true,
-						ValidateDiagFunc: IsValidPrefix,
-						Description:      "Network prefix in CIDR notation. Required to create a new network interface group. Currently only IPv4 addresses with subnet mask are supported.",
+						ValidateDiagFunc: IsValidCidr,
+						Description:      "Network prefix in CIDR notation. Required to create a new Network Interface Group. Currently only IPv4 addresses with subnet mask are supported.",
 					},
 					optionMtu: {
 						Type:        schema.TypeInt,
 						Optional:    true,
 						Default:     1500,
 						Description: "MTU setting for the subnet.",
+					},
+					optionVlan: {
+						Type:        schema.TypeInt,
+						Computed:    true,
+						Description: "The VLAN ID for this Network Interface Group.",
 					},
 				},
 			},
@@ -93,6 +98,7 @@ func resourceNetworkInterfaceGroup() *schema.Resource {
 	p := &networkInterfaceGroupProvider{BaseResourceProvider{ResourceKind: "NetworkInterfaceGroup"}}
 
 	networkInterfaceGroupResourceFunctions := NewBaseResourceFunctions("NetworkInterfaceGroup", p)
+	networkInterfaceGroupResourceFunctions.Resource.Description = "A Network Interface Group is a collection of Network Interfaces."
 	networkInterfaceGroupResourceFunctions.Resource.Schema = schemaNetworkInterfaceGroup()
 
 	return networkInterfaceGroupResourceFunctions.Resource
@@ -140,18 +146,7 @@ func (p *networkInterfaceGroupProvider) ReadResource(ctx context.Context, client
 		return err
 	}
 
-	d.Set(optionName, nig.Name)
-	d.Set(optionDisplayName, nig.DisplayName)
-	d.Set(optionAvailabilityZone, nig.AvailabilityZone.Name)
-	d.Set(optionRegion, nig.Region.Name)
-	d.Set(optionGroupType, nig.GroupType)
-	d.Set(optionGroupTypeEth, []map[string]interface{}{{
-		optionGateway: nig.Eth.Gateway,
-		optionPrefix:  nig.Eth.Prefix,
-		optionMtu:     nig.Eth.Mtu,
-	}})
-
-	return nil
+	return p.loadNetworkInterfaceGroup(nig, d)
 }
 
 func (p *networkInterfaceGroupProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (InvokeWriteAPI, error) {
@@ -191,6 +186,50 @@ func (p *networkInterfaceGroupProvider) PrepareUpdate(ctx context.Context, clien
 	return fn, patches, nil
 }
 
+func (p *networkInterfaceGroupProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) ([]*schema.ResourceData, error) {
+	var orderedRequiredGroupNames = []string{
+		resourceGroupNameRegion,
+		resourceGroupNameAvailabilityZone,
+		resourceGroupNameNetworkInterfaceGroup,
+	}
+	// The ID is user provided value - we expect self link
+	selfLinkFieldsWithValues, err := utilities.ParseSelfLink(d.Id(), orderedRequiredGroupNames)
+	if err != nil {
+		return nil, fmt.Errorf("invalid network_interface_group import path. Expected path in format '/regions/<region>/availability-zones/<availability-zone>/network-interface-groups/<network-interface-group>'")
+	}
+
+	networkInterfaceGroup, _, err := client.NetworkInterfaceGroupsApi.GetNetworkInterfaceGroup(ctx, selfLinkFieldsWithValues[resourceGroupNameRegion], selfLinkFieldsWithValues[resourceGroupNameAvailabilityZone], selfLinkFieldsWithValues[resourceGroupNameNetworkInterfaceGroup], nil)
+	if err != nil {
+		utilities.TraceError(ctx, err)
+		return nil, err
+	}
+
+	err = p.loadNetworkInterfaceGroup(networkInterfaceGroup, d)
+	if err != nil {
+		return nil, err
+	}
+
+	d.SetId(networkInterfaceGroup.Id)
+
+	return []*schema.ResourceData{d}, nil
+}
+
+func (p *networkInterfaceGroupProvider) loadNetworkInterfaceGroup(nig hmrest.NetworkInterfaceGroup, d *schema.ResourceData) error {
+	return getFirstError(
+		d.Set(optionName, nig.Name),
+		d.Set(optionDisplayName, nig.DisplayName),
+		d.Set(optionAvailabilityZone, nig.AvailabilityZone.Name),
+		d.Set(optionRegion, nig.Region.Name),
+		d.Set(optionGroupType, nig.GroupType),
+		d.Set(optionEth, []map[string]interface{}{{
+			optionGateway: nig.Eth.Gateway,
+			optionPrefix:  nig.Eth.Prefix,
+			optionMtu:     nig.Eth.Mtu,
+			optionVlan:    nig.Eth.Vlan,
+		}}),
+	)
+}
+
 func (p *networkInterfaceGroupProvider) composeEthChildOptionName(option string) string {
-	return optionGroupTypeEth + ".0." + option
+	return optionEth + ".0." + option
 }

@@ -32,3 +32,15 @@ func CheckImmutableFieldsExcept(ctx context.Context, d *schema.ResourceData, fie
 	}
 	return nil
 }
+
+func CheckImmutableFields(ctx context.Context, d *schema.ResourceData, fieldNames ...string) error {
+	if d.HasChanges(fieldNames...) {
+		d.Partial(true)
+		tflog.Error(
+			ctx,
+			"attempt to update an immutable field",
+			"resource_id", d.Id())
+		return ErrImmutableFieldChanged
+	}
+	return nil
+}

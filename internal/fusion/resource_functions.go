@@ -46,6 +46,9 @@ type ResourceProvider interface {
 
 	// PrepareDelete returns a function which will call the Delete REST API on this object and return an operation. Invoke it.
 	PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (fn InvokeWriteAPI, err error)
+
+	// ResourceImporter is a function which is called when Terraform is importing a resource.
+	ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (ds []*schema.ResourceData, err error)
 }
 
 // Actually, an empty implementation which returns "not implemented" errors. :-)
@@ -67,6 +70,10 @@ func (p *BaseResourceProvider) PrepareUpdate(ctx context.Context, client *hmrest
 
 func (p *BaseResourceProvider) PrepareDelete(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (fn InvokeWriteAPI, err error) {
 	return nil, fmt.Errorf("unsupported operation: delete %s", p.ResourceKind)
+}
+
+func (p *BaseResourceProvider) ImportResource(ctx context.Context, client *hmrest.APIClient, d *schema.ResourceData) (ds []*schema.ResourceData, err error) {
+	return nil, fmt.Errorf("unsupported operation: import %s", p.ResourceKind)
 }
 
 //
@@ -140,11 +147,13 @@ func (f *BaseResourceFunctions) resourceUpdate(ctx context.Context, d *schema.Re
 
 	callAPI, patches, err := f.Provider.PrepareUpdate(ctx, client, d)
 	if err != nil {
+		d.Partial(true)
 		return diag.FromErr(err)
 	}
 
 	err = executePatches(ctx, callAPI, patches, client, "resourceUpdate")
 	if err != nil {
+		d.Partial(true)
 		return utilities.ProcessClientError(ctx, "resourceUpdate", err)
 	}
 
@@ -179,6 +188,11 @@ func (f *BaseResourceFunctions) resourceDelete(ctx context.Context, d *schema.Re
 	return nil
 }
 
+func (f *BaseResourceFunctions) resourceImport(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+	client, ctx := f.resourceBoilerplate(ctx, "Import", d, m)
+	return f.Provider.ImportResource(ctx, client, d)
+}
+
 func executePatches(ctx context.Context, fn InvokeWriteAPI, patches []ResourcePatch, client *hmrest.APIClient, opSource string) error {
 	// Start operations for each update
 	for i, p := range patches {
@@ -203,18 +217,6 @@ func executePatches(ctx context.Context, fn InvokeWriteAPI, patches []ResourcePa
 		}
 	}
 	return nil
-}
-
-// resourcePureVolumeImport imports a volume into Terraform.
-// TODO: when is this used?
-func (f *BaseResourceFunctions) resourceImport(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
-	client, ctx := f.resourceBoilerplate(ctx, "Import", d, m)
-	err := f.Provider.ReadResource(ctx, client, d)
-	if err != nil {
-		tflog.Error(ctx, "in reading resource", "error_message", err)
-		return nil, err
-	}
-	return []*schema.ResourceData{d}, nil // TODO: We return one item. Looks like this API can do lists.
 }
 
 // A function used at the top of each CRUD function to grab stuff we need. Belongs in resource_functions.
@@ -270,4 +272,13 @@ func rdStringSet(ctx context.Context, d *schema.ResourceData, key string) []stri
 	}
 
 	return stringList
+}
+
+func getFirstError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
